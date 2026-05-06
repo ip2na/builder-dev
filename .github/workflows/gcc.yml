@@ -1,19 +1,7 @@
-name: chimw gcc test
+name: Build chime Kernel gcc
 
 on:
   workflow_dispatch:
-    inputs:
-      clang:
-        description: "Clang toolchain"
-        required: true
-        default: "aosp"
-        type: choice
-        options:
-          - aosp
-          - greenforce
-          - llvm
-          - zyc
-          - gcc
 
 jobs:
   build:
@@ -21,37 +9,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set Clang Variables
+      - name: Set GCC Variables
         run: |
-          case "${{ github.event.inputs.clang }}" in
-            greenforce)
-              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
-              CLANG_TYPE="mkdir"
-              ;;
-            llvm)
-              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.5-x86_64.tar.gz"
-              CLANG_TYPE="llvm"
-              ;;
-            zyc)
-              CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250401-release/Clang-20.0.0git-20250401.tar.gz"
-              CLANG_TYPE="mkdir"
-              ;;
-            aosp)
-              CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz"
-              CLANG_TYPE="mkdir"
-              ;;
-            gcc)
-              CLANG_URL="https://github.com/mvaisakh/gcc-build/releases/download/06052026/eva-gcc-arm64-06052026.xz"
-              CLANG_TYPE="gcc"
-              ;;
-          esac
-          FILENAME=$(basename "$CLANG_URL" .tar.gz)
-          # strip .xz extension juga kalau gcc
+          GCC_URL="https://github.com/mvaisakh/gcc-build/releases/download/06052026/eva-gcc-arm64-06052026.xz"
+          FILENAME=$(basename "$GCC_URL")
           FILENAME="${FILENAME%.xz}"
-          echo "CLANG_URL=$CLANG_URL" >> $GITHUB_ENV
-          echo "CLANG_TYPE=$CLANG_TYPE" >> $GITHUB_ENV
-          echo "CLANG_DIR=$FILENAME" >> $GITHUB_ENV
-          echo "CLANG_CACHE_KEY=$FILENAME" >> $GITHUB_ENV
+          FILENAME="${FILENAME%.tar.gz}"
+          echo "GCC_URL=$GCC_URL" >> $GITHUB_ENV
+          echo "GCC_DIR=$FILENAME" >> $GITHUB_ENV
+          echo "GCC_CACHE_KEY=$FILENAME" >> $GITHUB_ENV
 
       - name: Free Disk Space
         run: |
@@ -62,36 +28,49 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git curl wget bc bison flex libssl-dev libelf-dev zip cpio xz-utils
+          sudo apt install -y git curl wget bc bison flex libssl-dev libelf-dev zip cpio xz-utils file
 
-      - name: Cache Clang
-        id: cache-clang
+      - name: Cache GCC
+        id: cache-gcc
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
-          key: ${{ env.CLANG_CACHE_KEY }}
+          path: ${{ github.workspace }}/${{ env.GCC_DIR }}
+          key: ${{ env.GCC_CACHE_KEY }}
 
-      - name: Setup Clang
-        if: steps.cache-clang.outputs.cache-hit != 'true'
+      - name: Setup GCC
+        if: steps.cache-gcc.outputs.cache-hit != 'true'
         run: |
-          if [ "$CLANG_TYPE" = "llvm" ]; then
-            wget "$CLANG_URL"
-            tar -zxf "$(basename "$CLANG_URL")"
-            rm -f "$(basename "$CLANG_URL")"
-          elif [ "$CLANG_TYPE" = "gcc" ]; then
-            mkdir -p "$CLANG_DIR"
-            wget -O gcc.tar.xz "$CLANG_URL"
-            tar -xJf gcc.tar.xz -C "$CLANG_DIR" --strip-components=1
-            rm -f gcc.tar.xz
-          else
-            mkdir -p "$CLANG_DIR"
-            wget -O clang.tar.gz "$CLANG_URL"
-            tar -zxf clang.tar.gz -C "$CLANG_DIR"
-            rm -f clang.tar.gz
-          fi
+          mkdir -p "$GCC_DIR"
+          wget -O gcc.archive "$GCC_URL"
 
-      - name: Set Clang PATH
-        run: echo "CLANG_PATH=$(pwd)/$CLANG_DIR/bin" >> $GITHUB_ENV
+          FILETYPE=$(file -b gcc.archive)
+          echo "Detected file type: $FILETYPE"
+
+          case "$FILETYPE" in
+            *"XZ compressed"*)
+              tar -xJf gcc.archive -C "$GCC_DIR" --strip-components=1
+              ;;
+            *"gzip compressed"*)
+              tar -xzf gcc.archive -C "$GCC_DIR" --strip-components=1
+              ;;
+            *"bzip2 compressed"*)
+              tar -xjf gcc.archive -C "$GCC_DIR" --strip-components=1
+              ;;
+            *"Zip archive"*)
+              unzip -q gcc.archive -d "$GCC_DIR"
+              ;;
+            *)
+              echo "Unknown format: $FILETYPE"
+              exit 1
+              ;;
+          esac
+
+          rm -f gcc.archive
+          echo "GCC bin contents:"
+          ls "$GCC_DIR/bin/" | head -20
+
+      - name: Set GCC PATH
+        run: echo "GCC_PATH=$(pwd)/$GCC_DIR/bin" >> $GITHUB_ENV
 
       - name: Clone Kernel Source
         run: |
@@ -113,36 +92,30 @@ jobs:
         run: |
           cd kernel
           export TZ="Asia/Jakarta"
-          export PATH="$CLANG_PATH:$PATH"
+          export PATH="$GCC_PATH:$PATH"
           export KBUILD_BUILD_USER="builder-dev"
           export KBUILD_BUILD_HOST="anyaprjk"
 
-          if [ "$CLANG_TYPE" = "gcc" ]; then
-            make ARCH=arm64 \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              CC=aarch64-linux-gnu-gcc \
-              O=out vendor/bengal-perf_defconfig
+          GCC_PREFIX=$(ls "$GCC_PATH" | grep -m1 "gcc$" | sed 's/gcc$//')
+          echo "Using GCC prefix: $GCC_PREFIX"
 
-            make ARCH=arm64 \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              CC=aarch64-linux-gnu-gcc \
-              O=out -j$(nproc --all) Image.gz dtbs
-          else
-            make ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out CROSS_COMPILE=aarch64-linux-gnu- vendor/bengal-perf_defconfig
-            make ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc --all) Image.gz dtbs
-          fi
+          make ARCH=arm64 \
+            CROSS_COMPILE="$GCC_PREFIX" \
+            CC="${GCC_PREFIX}gcc" \
+            O=out vendor/bengal-perf_defconfig
+
+          make ARCH=arm64 \
+            CROSS_COMPILE="$GCC_PREFIX" \
+            CC="${GCC_PREFIX}gcc" \
+            O=out -j$(nproc --all) Image.gz dtbs
 
       - name: Generate Build Info
         run: |
-          if [ "$CLANG_TYPE" = "gcc" ]; then
-            COMPILER_VER=$($CLANG_PATH/aarch64-linux-gnu-gcc --version | head -n 1)
-          else
-            COMPILER_VER=$($CLANG_PATH/clang --version | head -n 1)
-          fi
+          GCC_PREFIX=$(ls "$GCC_PATH" | grep -m1 "gcc$" | sed 's/gcc$//')
           echo "BRANCH=$(git -C kernel rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
           echo "COMMIT=$(git -C kernel log -1 --pretty=format:'%s (%an)')" >> $GITHUB_ENV
           echo "KERNEL_VER=$(cat kernel/out/include/generated/utsrelease.h | sed 's/.*\"\(.*\)\".*/\1/')" >> $GITHUB_ENV
-          echo "COMPILER=$COMPILER_VER" >> $GITHUB_ENV
+          echo "COMPILER=$($GCC_PATH/${GCC_PREFIX}gcc --version | head -n 1)" >> $GITHUB_ENV
           echo "DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')" >> $GITHUB_ENV
           echo "ZIP_NAME=Valeryn-SM6115-${{ github.run_number }}.zip" >> $GITHUB_ENV
 
@@ -172,7 +145,7 @@ jobs:
           ZIP_PATH: ${{ github.workspace }}/ak3/${{ env.ZIP_NAME }}
         run: |
           python3 - <<'EOF'
-          import requests, os, sys
+          import requests, os
 
           token    = os.environ["TELEGRAM_TOKEN"]
           chat_id  = os.environ["TELEGRAM_CHAT_ID"]

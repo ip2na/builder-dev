@@ -10,8 +10,7 @@ on:
         type: choice
         options:
           - main
-          - staging
-          - linux-stable
+          - staging          
       build_type:
         description: "Build type to run"
         required: true

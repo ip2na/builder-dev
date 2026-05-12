@@ -65,19 +65,18 @@ jobs:
           export KBUILD_BUILD_HOST="anyaprjk"
 
           # Clang as compiler · aarch64-linux-gnu (apt) as cross-assembler/linker
-          # Polly + O3 + LTO thin — Clang-native, safe on 4.19.x
+          # LTO dan flag linker dimatiin — konflik dengan GCC ld di vDSO 4.19.x
           export KCFLAGS="-O3 \
             -march=armv8-a+crc+simd \
             -mtune=cortex-a53 \
             -mllvm -polly \
             -mllvm -polly-vectorizer=stripmine \
             -fno-semantic-interposition"
-          export KLDFLAGS="-flto=thin"
 
           MAKE="make ARCH=arm64 O=out \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-linux-gnu-" 
+            CROSS_COMPILE=aarch64-linux-gnu-"
 
           $MAKE vendor/bengal-perf_defconfig
           $MAKE -j$(nproc) Image.gz dtbs

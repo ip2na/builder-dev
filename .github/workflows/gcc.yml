@@ -60,6 +60,9 @@ jobs:
           esac
           rm -f gcc.archive
 
+          # Debug: verify GCC bin
+          echo "=== GCC bin ===" && ls "$GCC_DIR/bin" | head -20
+
       - name: Checkout kernel source
         run: git clone --branch ${{ github.event.inputs.branch }} --depth=1 https://github.com/ip2na/anya_xiaomi_sm6115.git kernel
 
@@ -74,12 +77,18 @@ jobs:
         run: |
           CLANG_BIN="${{ github.workspace }}/${{ env.CLANG_DIR }}/bin"
           GCC_BIN="${{ github.workspace }}/${{ env.GCC_DIR }}/bin"
+
+          echo "=== GCC bin ===" && ls "$GCC_BIN" | head -20
           GCC_PREFIX=$(ls "$GCC_BIN" | grep -m1 "gcc$" | sed 's/gcc$//')
+          echo "GCC_PREFIX: '$GCC_PREFIX'"
 
           export TZ="Asia/Jakarta"
           export PATH="$CLANG_BIN:$GCC_BIN:$PATH"
           export KBUILD_BUILD_USER="builder-dev"
-          export KBUILD_BUILD_HOST="anyaprjk"        
+          export KBUILD_BUILD_HOST="anyaprjk"
+
+          # Clang as compiler · GCC as cross-assembler
+          # Polly + O3 + LTO thin — Clang-native, safe on 4.19.x
           export KCFLAGS="-O3 \
             -march=armv8-a+crc+simd \
             -mtune=cortex-a53 \

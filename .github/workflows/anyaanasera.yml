@@ -1,4 +1,4 @@
-name: Anya Kernel Matrix FX
+name: Anya Kernel — Matrix CI
 
 on:
   workflow_dispatch:
@@ -67,7 +67,7 @@ jobs:
             release_tags_staging: "#Anyakernel #staging #vanilla #gki-5.10"
 
     steps:
-      - name: Check Build Type
+      - name: Evaluate matrix target
         id: check
         run: |
           INPUT="${{ github.event.inputs.build_type }}"
@@ -78,7 +78,7 @@ jobs:
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Resolve Branch-aware Variables
+      - name: Resolve branch-aware variables
         if: steps.check.outputs.should_run == 'true'
         run: |
           BRANCH_INPUT="${{ github.event.inputs.branch }}"
@@ -101,7 +101,7 @@ jobs:
             echo "RELEASE_TAGS=${{ matrix.release_tags_main }}" >> $GITHUB_ENV
           fi
 
-      - name: Set Clang Variables
+      - name: Configure toolchain
         if: steps.check.outputs.should_run == 'true'
         run: |
           case "${{ github.event.inputs.clang }}" in
@@ -132,7 +132,7 @@ jobs:
         if: steps.check.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
-      - name: Set Build Tag
+      - name: Set release tag
         if: steps.check.outputs.should_run == 'true'
         run: |
           if [ "$IS_STAGING" = "true" ]; then
@@ -141,20 +141,19 @@ jobs:
             echo "RELEASE_TAG=${RELEASE_PREFIX}-${{ github.run_number }}" >> $GITHUB_ENV
           fi
 
-      - name: Free Disk Space
+      - name: Reclaim disk space
         if: steps.check.outputs.should_run == 'true'
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/share/dotnet /opt/ghc
           sudo apt clean
 
-      - name: Install Dependencies
+      - name: Install build dependencies
         if: steps.check.outputs.should_run == 'true'
         run: |
           sudo apt update
           sudo apt install -y git curl wget bc bison flex libssl-dev libelf-dev zip cpio
 
-      - name: Cache Clang
+      - name: Restore toolchain cache
         if: steps.check.outputs.should_run == 'true'
         id: cache-clang
         uses: actions/cache@v4
@@ -162,7 +161,7 @@ jobs:
           path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
           key: ${{ env.CLANG_CACHE_KEY }}
 
-      - name: Setup Clang
+      - name: Download Clang
         if: steps.check.outputs.should_run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           if [ "$CLANG_TYPE" = "llvm" ]; then
@@ -176,16 +175,15 @@ jobs:
             rm -rf clang.tar.gz
           fi
 
-      - name: Set Clang PATH
+      - name: Export Clang path
         if: steps.check.outputs.should_run == 'true'
         run: echo "CLANG_PATH=$(pwd)/$CLANG_DIR/bin" >> $GITHUB_ENV
 
-      - name: Clone Kernel Source
+      - name: Checkout kernel source
         if: steps.check.outputs.should_run == 'true'
-        run: |
-          git clone --branch $KERNEL_BRANCH --depth=1 ${{ secrets.KERNEL_SOURCE }} kernel
+        run: git clone --branch $KERNEL_BRANCH --depth=1 ${{ secrets.KERNEL_SOURCE }} kernel
 
-      - name: Setup KernelSU Next + SUSFS
+      - name: Integrate KernelSU Next + SUSFS
         if: steps.check.outputs.should_run == 'true' && matrix.type == 'susfs'
         run: |
           cd kernel
@@ -205,14 +203,14 @@ jobs:
           cp -R $kernel_patches/include/* ./include
           patch -p1 < $kernel_patches/*.patch || true
 
-      - name: Apply All Managers Patch
+      - name: Apply all-managers patch
         if: steps.check.outputs.should_run == 'true' && matrix.type == 'susfs'
         run: |
           cd kernel
           curl -LSs "${{ secrets.PATCH_URL }}" -o /tmp/ksun-allmanager.patch
           cd KernelSU-Next && patch -p1 < /tmp/ksun-allmanager.patch && cd ..
 
-      - name: Inject Config
+      - name: Apply defconfig overlay
         if: steps.check.outputs.should_run == 'true'
         run: |
           DEFCONFIG="kernel/arch/arm64/configs/gki_defconfig"
@@ -222,7 +220,7 @@ jobs:
             printf '%s\n' "${{ secrets.CONFIG_LINES_VANILLA }}" >> "$DEFCONFIG"
           fi
 
-      - name: Build Kernel
+      - name: Compile
         if: steps.check.outputs.should_run == 'true'
         run: |
           cd kernel
@@ -233,7 +231,7 @@ jobs:
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc --all) Image
 
-      - name: Generate Build Info
+      - name: Collect build metadata
         if: steps.check.outputs.should_run == 'true'
         run: |
           cd kernel
@@ -243,23 +241,14 @@ jobs:
           echo "COMPILER=$($CLANG_PATH/clang --version | head -n 1)" >> $GITHUB_ENV
           echo "DATE=$(TZ=Asia/Jakarta date "+%d/%m/%Y %H:%M WIB")" >> $GITHUB_ENV
 
-      - name: Clone AnyKernel3
+      - name: Package flashable ZIP
         if: steps.check.outputs.should_run == 'true'
         run: |
           git clone --depth=1 -b gki-2.0 ${{ secrets.AK3_REPO }} ak3
-
-      - name: Copy Image
-        if: steps.check.outputs.should_run == 'true'
-        run: |
           cp kernel/out/arch/arm64/boot/Image ak3/
+          cd ak3 && zip -r9 $ZIP_NAME * -x "*.git*" -x "*.github*"
 
-      - name: Pack ZIP
-        if: steps.check.outputs.should_run == 'true'
-        run: |
-          cd ak3
-          zip -r9 $ZIP_NAME * -x "*.git*" -x "*.github*"
-
-      - name: Send Changelog to Telegram
+      - name: Publish changelog to Telegram
         if: steps.check.outputs.should_run == 'true'
         run: |
           RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
@@ -295,7 +284,7 @@ jobs:
             -d "disable_web_page_preview=true" \
             --data-urlencode "text=$MESSAGE"
 
-      - name: Cleanup Old Releases (keep latest 25)
+      - name: Prune old releases
         if: steps.check.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -307,7 +296,7 @@ jobs:
             gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           done
 
-      - name: Upload to GitHub Release
+      - name: Publish to GitHub Releases
         if: steps.check.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

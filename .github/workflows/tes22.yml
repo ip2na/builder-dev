@@ -12,7 +12,7 @@ jobs:
       - name: Set Clang Variables
         run: |
           CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
-          FILENAME="clang-r547379"
+          FILENAME="gf-clang-22.1.4-20260410"
           echo "CLANG_URL=$CLANG_URL" >> $GITHUB_ENV
           echo "CLANG_DIR=$FILENAME" >> $GITHUB_ENV
           echo "CLANG_CACHE_KEY=$FILENAME" >> $GITHUB_ENV

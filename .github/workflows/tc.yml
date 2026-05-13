@@ -1,8 +1,5 @@
-name: Anya Kernel Ps — Matrix CI
+name: Anya Kernel — Matrix CI
 
-# ─────────────────────────────────────────────
-#  Trigger
-# ─────────────────────────────────────────────
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +15,7 @@ on:
           - linux-staging
           - personal-use
       build_type:
-        description: "Build type"
+        description: "Build variant"
         required: true
         default: "all"
         type: choice
@@ -37,19 +34,15 @@ on:
           - zyc
           - aosp
 
-# ─────────────────────────────────────────────
-#  Jobs
-# ─────────────────────────────────────────────
 jobs:
   build:
-    name: "Build [${{ matrix.name }}]"
+    name: "${{ matrix.name }}"
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: KSU+SUSFS
+          - name: "KSU + SUSFS"
             type: susfs
             zip_suffix: Kernel-KSU-SUSFS
             build_host: anyaprjkt
@@ -57,97 +50,101 @@ jobs:
             tg_tags_main: "#Anyakernel #update #gki510 #ksu #susfs"
             tg_tags_staging: "#Anyakernel #staging #gki510 #ksu #susfs"
 
-          - name: Vanilla
+          - name: "Vanilla"
             type: vanilla
             zip_suffix: Kernel-Vanilla
             build_host: Anyaanasera
-            tg_label: "Vanilla (No KSU/SUSFS)"
+            tg_label: "Vanilla"
             tg_tags_main: "#Anyakernel #vanilla #gki510"
             tg_tags_staging: "#Anyakernel #staging #vanilla #gki510"
 
     steps:
-      # ── 0. Gate: skip matrix leg if not selected ──────────────────────────
-      - name: Check matrix target
+      # ── Gate ──────────────────────────────────────────────────────────────
+      # Skip this matrix leg early if the selected build_type doesn't match.
+      - name: Evaluate build target
         id: gate
         run: |
-          INPUT="${{ github.event.inputs.build_type }}"
-          TYPE="${{ matrix.type }}"
-          if [ "$INPUT" = "all" ] || [ "$INPUT" = "$TYPE" ]; then
+          if [[ "${{ github.event.inputs.build_type }}" == "all" || \
+                "${{ github.event.inputs.build_type }}" == "${{ matrix.type }}" ]]; then
             echo "run=true" >> $GITHUB_OUTPUT
           else
             echo "run=false" >> $GITHUB_OUTPUT
           fi
 
-      # ── 1. Resolve branch / naming variables ──────────────────────────────
-      - name: Resolve variables
+      # ── Environment ───────────────────────────────────────────────────────
+      # Derive all branch-dependent naming variables up front so every
+      # subsequent step reads from $GITHUB_ENV without conditionals.
+      - name: Resolve build environment
         if: steps.gate.outputs.run == 'true'
         run: |
-          BRANCH_INPUT="${{ github.event.inputs.branch }}"
+          BRANCH="${{ github.event.inputs.branch }}"
 
-          if [ "$BRANCH_INPUT" = "staging" ]; then
-            echo "IS_STAGING=true"                                        >> $GITHUB_ENV
-            echo "KERNEL_BRANCH=staging"                                  >> $GITHUB_ENV
-            echo "ZIP_NAME=${{ matrix.zip_suffix }}-Staging.zip"         >> $GITHUB_ENV
-            echo "TG_VERSION=${{ matrix.tg_label }} [STAGING]"           >> $GITHUB_ENV
-            echo "TG_TAGS=${{ matrix.tg_tags_staging }}"                 >> $GITHUB_ENV
+          if [[ "$BRANCH" == "staging" ]]; then
+            {
+              echo "IS_STAGING=true"
+              echo "KERNEL_BRANCH=staging"
+              echo "ZIP_NAME=${{ matrix.zip_suffix }}-Staging.zip"
+              echo "TG_VERSION=${{ matrix.tg_label }} [STAGING]"
+              echo "TG_TAGS=${{ matrix.tg_tags_staging }}"
+            } >> $GITHUB_ENV
           else
-            echo "IS_STAGING=false"                                       >> $GITHUB_ENV
-            echo "KERNEL_BRANCH=$BRANCH_INPUT"                            >> $GITHUB_ENV
-            echo "ZIP_NAME=${{ matrix.zip_suffix }}.zip"                  >> $GITHUB_ENV
-            echo "TG_VERSION=${{ matrix.tg_label }}"                     >> $GITHUB_ENV
-            echo "TG_TAGS=${{ matrix.tg_tags_main }}"                    >> $GITHUB_ENV
+            {
+              echo "IS_STAGING=false"
+              echo "KERNEL_BRANCH=$BRANCH"
+              echo "ZIP_NAME=${{ matrix.zip_suffix }}.zip"
+              echo "TG_VERSION=${{ matrix.tg_label }}"
+              echo "TG_TAGS=${{ matrix.tg_tags_main }}"
+            } >> $GITHUB_ENV
           fi
 
-      # ── 2. Resolve toolchain URL & cache key ──────────────────────────────
+      # Resolve toolchain URL, extraction strategy, and cache key.
       - name: Resolve toolchain
         if: steps.gate.outputs.run == 'true'
         run: |
           case "${{ github.event.inputs.clang }}" in
             greenforce)
               URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
-              TYPE="wrap"
-              ;;
+              LAYOUT="wrap" ;;
             llvm)
               URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.4-x86_64.tar.gz"
-              TYPE="flat"
-              ;;
+              LAYOUT="flat" ;;
             zyc)
               URL="https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250401-release/Clang-20.0.0git-20250401.tar.gz"
-              TYPE="wrap"
-              ;;
+              LAYOUT="wrap" ;;
             aosp)
               URL="https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r584948b-14863223/clang-r584948b.tar.gz"
-              TYPE="wrap"
-              ;;
+              LAYOUT="wrap" ;;
           esac
-          DIR=$(basename "$URL" .tar.gz)
-          echo "CLANG_URL=$URL"       >> $GITHUB_ENV
-          echo "CLANG_TYPE=$TYPE"     >> $GITHUB_ENV
-          echo "CLANG_DIR=$DIR"       >> $GITHUB_ENV
-          echo "CLANG_CACHE_KEY=$DIR" >> $GITHUB_ENV
 
-      # ── 3. Checkout workflow repo ─────────────────────────────────────────
+          DIR="$(basename "$URL" .tar.gz)"
+          {
+            echo "CLANG_URL=$URL"
+            echo "CLANG_LAYOUT=$LAYOUT"
+            echo "CLANG_DIR=$DIR"
+            echo "CLANG_CACHE_KEY=$DIR"
+          } >> $GITHUB_ENV
+
+      # ── Setup ─────────────────────────────────────────────────────────────
       - name: Checkout
         if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
 
-      # ── 4. Free disk space ────────────────────────────────────────────────
       - name: Reclaim disk space
         if: steps.gate.outputs.run == 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc
           sudo apt-get clean -q
 
-      # ── 5. Install build dependencies ─────────────────────────────────────
-      - name: Install dependencies
+      - name: Install build dependencies
         if: steps.gate.outputs.run == 'true'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            git curl wget bc bison flex \
-            libssl-dev libelf-dev zip cpio python3-requests
+            bc bison cpio curl flex git \
+            libelf-dev libssl-dev python3-requests \
+            wget zip
 
-      # ── 6. Restore cached toolchain ───────────────────────────────────────
+      # ── Toolchain ─────────────────────────────────────────────────────────
       - name: Restore toolchain cache
         if: steps.gate.outputs.run == 'true'
         id: cache-clang
@@ -156,82 +153,78 @@ jobs:
           path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
           key: ${{ env.CLANG_CACHE_KEY }}
 
-      # ── 7. Download toolchain (cache miss only) ───────────────────────────
-      - name: Download Clang
+      # Two extraction strategies:
+      #   flat   — archive already contains a top-level named directory (LLVM dist tarballs).
+      #   wrap   — archive dumps files at root; we create the target directory ourselves.
+      - name: Download toolchain
         if: steps.gate.outputs.run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          if [ "$CLANG_TYPE" = "flat" ]; then
-            # Archive extracts to a named dir already (llvm-style)
+          if [[ "$CLANG_LAYOUT" == "flat" ]]; then
             wget -q "$CLANG_URL"
             tar -zxf "$(basename "$CLANG_URL")"
             rm  -f  "$(basename "$CLANG_URL")"
           else
-            # Archive contains files at root; wrap in our own dir
             mkdir -p "$CLANG_DIR"
             wget -q -O clang.tar.gz "$CLANG_URL"
             tar -zxf clang.tar.gz -C "$CLANG_DIR"
             rm  -f  clang.tar.gz
           fi
 
-      # ── 8. Export Clang bin path ──────────────────────────────────────────
-      - name: Export Clang path
+      - name: Export toolchain path
         if: steps.gate.outputs.run == 'true'
         run: echo "CLANG_PATH=$(pwd)/$CLANG_DIR/bin" >> $GITHUB_ENV
 
-      # ── 9. Clone kernel source ────────────────────────────────────────────
+      # ── Source ────────────────────────────────────────────────────────────
+      # Strip any accidental whitespace from the secret before passing to git.
       - name: Clone kernel source
         if: steps.gate.outputs.run == 'true'
         run: |
-          git clone \
-            --branch "$KERNEL_BRANCH" \
-            --depth=1 \
-            "${{ secrets.KERNEL_SOURCE }}" \
-            kernel
+          KSRC="$(echo '${{ secrets.KERNEL_SOURCE }}' | xargs)"
+          git clone --branch "$KERNEL_BRANCH" --depth=1 "$KSRC" kernel
 
-      # ── 10. Integrate KernelSU-Next + SUSFS (susfs only) ─────────────────
-      - name: Integrate KernelSU-Next + SUSFS
+      # ── KernelSU-Next + SUSFS integration (susfs variant only) ────────────
+      - name: Integrate KernelSU-Next
         if: steps.gate.outputs.run == 'true' && matrix.type == 'susfs'
         run: |
           cd kernel
-
-          # KernelSU-Next
           curl -LSs \
             "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" \
             | bash -s dev-susfs
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> $GITHUB_ENV
 
-          # SUSFS
+      - name: Integrate SUSFS
+        if: steps.gate.outputs.run == 'true' && matrix.type == 'susfs'
+        run: |
+          cd kernel
           git clone --depth=1 \
-            https://gitlab.com/simonpunk/susfs4ksu \
             -b gki-android12-5.10 \
+            https://gitlab.com/simonpunk/susfs4ksu \
             .susfs
           echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> $GITHUB_ENV
 
-          # Apply patches
           PATCHES=".susfs/kernel_patches"
           cp -R "$PATCHES/fs/"*      ./fs/
           cp -R "$PATCHES/include/"* ./include/
           patch -p1 --forward < "$PATCHES"/*.patch || true
 
-      # ── 11. Apply all-managers patch (susfs only) ─────────────────────────
       - name: Apply all-managers patch
         if: steps.gate.outputs.run == 'true' && matrix.type == 'susfs'
         run: |
           curl -LSs "${{ secrets.PATCH_URL }}" -o /tmp/allmanager.patch
           patch -p1 --forward -d kernel/KernelSU-Next < /tmp/allmanager.patch
 
-      # ── 12. Inject defconfig lines ────────────────────────────────────────
-      - name: Apply defconfig overlay
+      # ── Config ────────────────────────────────────────────────────────────
+      - name: Inject defconfig overlay
         if: steps.gate.outputs.run == 'true'
         run: |
           DEFCONFIG="kernel/arch/arm64/configs/gki_defconfig"
-          if [ "${{ matrix.type }}" = "susfs" ]; then
-            printf '%s\n' "${{ secrets.CONFIG_LINES_SUSFS }}" >> "$DEFCONFIG"
+          if [[ "${{ matrix.type }}" == "susfs" ]]; then
+            printf '%s\n' "${{ secrets.CONFIG_LINES_SUSFS }}"  >> "$DEFCONFIG"
           else
             printf '%s\n' "${{ secrets.CONFIG_LINES_VANILLA }}" >> "$DEFCONFIG"
           fi
 
-      # ── 13. Compile ───────────────────────────────────────────────────────
+      # ── Build ─────────────────────────────────────────────────────────────
       - name: Compile
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -240,22 +233,24 @@ jobs:
           export PATH="$CLANG_PATH:$PATH"
           export KBUILD_BUILD_USER="builder-dev"
           export KBUILD_BUILD_HOST="${{ matrix.build_host }}"
-          MAKE="make ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out CROSS_COMPILE=aarch64-linux-gnu-"
-          $MAKE gki_defconfig
-          $MAKE -j$(nproc --all) Image
 
-      # ── 14. Collect build metadata ────────────────────────────────────────
+          MAKE=(make ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out CROSS_COMPILE=aarch64-linux-gnu-)
+          "${MAKE[@]}" gki_defconfig
+          "${MAKE[@]}" -j"$(nproc --all)" Image
+
       - name: Collect build metadata
         if: steps.gate.outputs.run == 'true'
         run: |
           cd kernel
-          echo "GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)"                                >> $GITHUB_ENV
-          echo "GIT_COMMIT=$(git log -1 --pretty=format:'%s (%an)')"                          >> $GITHUB_ENV
-          echo "KERNEL_VER=$(sed 's/.*\"\(.*\)\".*/\1/' out/include/generated/utsrelease.h)"  >> $GITHUB_ENV
-          echo "COMPILER=$("$CLANG_PATH/clang" --version | head -n1)"                         >> $GITHUB_ENV
-          echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"                     >> $GITHUB_ENV
+          {
+            echo "GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)"
+            echo "GIT_COMMIT=$(git log -1 --pretty=format:'%s (%an)')"
+            echo "KERNEL_VER=$(sed 's/.*\"\(.*\)\".*/\1/' out/include/generated/utsrelease.h)"
+            echo "COMPILER=$("$CLANG_PATH/clang" --version | head -n1)"
+            echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
+          } >> $GITHUB_ENV
 
-      # ── 15. Package AnyKernel3 ZIP ────────────────────────────────────────
+      # ── Artifact ──────────────────────────────────────────────────────────
       - name: Package flashable ZIP
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -263,7 +258,9 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image ak3/
           cd ak3 && zip -r9 "../$ZIP_NAME" . -x "*.git*" "*.github*"
 
-      # ── 16. Upload ZIP + caption to Telegram ─────────────────────────────
+      # ── Publish ───────────────────────────────────────────────────────────
+      # Send the flashable ZIP directly to Telegram with a structured caption.
+      # All metadata is passed as explicit env vars — no shell heredoc tricks.
       - name: Upload to Telegram
         if: steps.gate.outputs.run == 'true'
         env:
@@ -284,57 +281,56 @@ jobs:
           python3 - <<'PYEOF'
           import os, sys, requests
 
-          def e(k, default=""):
-              return os.environ.get(k, default).strip()
+          def ev(key, default=""):
+              return os.environ.get(key, default).strip()
 
-          # ── Compose caption ────────────────────────────────────────────────
+          # Build caption
           lines = []
 
-          if e("IS_STAGING") == "true":
+          if ev("IS_STAGING") == "true":
               lines.append("⚠️ <b>[STAGING BUILD]</b>\n")
 
           lines += [
-              f"<b>🌸 Anya Kernel — {e('TG_VERSION')}</b>",
+              f"<b>🌸 Anya Kernel — {ev('TG_VERSION')}</b>",
               "",
-              f"🌱 <b>Branch:</b>     <code>{e('GIT_BRANCH')}</code>",
-              f"🐧 <b>Linux:</b>      <code>{e('KERNEL_VER')}</code>",
-              f"📆 <b>Date:</b>       <code>{e('BUILD_DATE')}</code>",
-              f"♻️ <b>Commit:</b>     {e('GIT_COMMIT')}",
+              f"🌱 <b>Branch:</b>    <code>{ev('GIT_BRANCH')}</code>",
+              f"🐧 <b>Linux:</b>     <code>{ev('KERNEL_VER')}</code>",
+              f"📆 <b>Date:</b>      <code>{ev('BUILD_DATE')}</code>",
+              f"♻️ <b>Commit:</b>    {ev('GIT_COMMIT')}",
           ]
 
-          ksu = e("KSU_COMMIT")
-          sus = e("SUSFS_COMMIT")
+          ksu = ev("KSU_COMMIT")
+          sus = ev("SUSFS_COMMIT")
           if ksu and sus:
               lines += [
-                  f"🔐 <b>KSU:</b>       {ksu}",
-                  f"🛡️ <b>SUSFS:</b>     {sus}",
+                  f"🔐 <b>KSU:</b>      {ksu}",
+                  f"🛡️ <b>SUSFS:</b>    {sus}",
               ]
 
           lines += [
-              f"⚙️ <b>Compiler:</b>  {e('COMPILER')}",
+              f"⚙️ <b>Compiler:</b> {ev('COMPILER')}",
               "",
-              e("TG_TAGS"),
+              ev("TG_TAGS"),
           ]
 
-          caption = "\n".join(lines)
+          caption  = "\n".join(lines)
+          zip_name = ev("ZIP_NAME")
 
-          # ── Send document ──────────────────────────────────────────────────
-          zip_name = e("ZIP_NAME")
-          with open(zip_name, "rb") as f:
+          with open(zip_name, "rb") as fh:
               resp = requests.post(
-                  f"https://api.telegram.org/bot{e('BOT_TOKEN')}/sendDocument",
+                  f"https://api.telegram.org/bot{ev('BOT_TOKEN')}/sendDocument",
                   data={
-                      "chat_id":    e("CHAT_ID"),
+                      "chat_id":    ev("CHAT_ID"),
                       "caption":    caption,
                       "parse_mode": "HTML",
                   },
-                  files={"document": (zip_name, f, "application/zip")},
+                  files={"document": (zip_name, fh, "application/zip")},
                   timeout=300,
               )
 
           if resp.ok:
-              print("✓ Upload successful.")
+              print("artifact dispatched.")
           else:
-              print(f"✗ Upload failed [{resp.status_code}]: {resp.text}", file=sys.stderr)
+              print(f"upload failed [{resp.status_code}]: {resp.text}", file=sys.stderr)
               sys.exit(1)
           PYEOF

@@ -251,7 +251,8 @@ jobs:
       - name: Publish changelog to Telegram
         if: steps.check.outputs.should_run == 'true'
         run: |
-          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
+          # URL release menggunakan repo baru
+          RELEASE_URL="https://github.com/AnyaKernel/Kernel-Release/releases/tag/$RELEASE_TAG"
           if [ "${{ matrix.type }}" = "susfs" ]; then
             EXTRA_INFO="🔐 <b>KSU commit:</b> $KSU_COMMIT
           🛡️ <b>SUSFS commit:</b> $SUSFS_COMMIT"
@@ -287,19 +288,19 @@ jobs:
       - name: Prune old releases
         if: steps.check.outputs.should_run == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          RELEASES=$(gh release list --limit 100 --json tagName,createdAt \
+          RELEASES=$(gh release list --repo AnyaKernel/Kernel-Release --limit 100 --json tagName,createdAt \
             --jq 'sort_by(.createdAt) | reverse | .[25:] | .[].tagName')
           for TAG in $RELEASES; do
             echo "Deleting old release: $TAG"
-            gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+            gh release delete "$TAG" --repo AnyaKernel/Kernel-Release --yes --cleanup-tag 2>/dev/null || true
           done
 
       - name: Publish to GitHub Releases
         if: steps.check.outputs.should_run == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           if [ "${{ matrix.type }}" = "susfs" ]; then
             EXTRA_NOTES="**🔐 KSU commit:** $KSU_COMMIT
@@ -325,11 +326,12 @@ jobs:
           ---
           $RELEASE_TAGS"
             gh release create "$RELEASE_TAG" \
+              --repo AnyaKernel/Kernel-Release \
               ak3/$ZIP_NAME \
               --title "$RELEASE_TITLE" \
               --notes "$RELEASE_NOTES" \
               --prerelease \
-            || gh release upload "$RELEASE_TAG" ak3/$ZIP_NAME --clobber
+            || gh release upload "$RELEASE_TAG" --repo AnyaKernel/Kernel-Release ak3/$ZIP_NAME --clobber
           else
             RELEASE_TITLE="Anya Kernel | $TELEGRAM_VERSION | GKI 5.10 | $DATE"
             RELEASE_NOTES="## 🌸 Anya Kernel — $TELEGRAM_VERSION
@@ -345,6 +347,7 @@ jobs:
           ---
           $RELEASE_TAGS"
             gh release create "$RELEASE_TAG" \
+              --repo AnyaKernel/Kernel-Release \
               ak3/$ZIP_NAME \
               --title "$RELEASE_TITLE" \
               --notes "$RELEASE_NOTES" \

@@ -1,4 +1,4 @@
-name: Anya Kernel — Matrix CI
+name: Anya Kernel Ps — Matrix CI
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       branch:
         description: "Kernel source branch"
         required: true
-        default: "main"
+        default: "personal-use"
         type: choice
         options:
           - main
@@ -17,7 +17,7 @@ on:
       build_type:
         description: "Build variant"
         required: true
-        default: "all"
+        default: "susfs"
         type: choice
         options:
           - all
@@ -59,8 +59,7 @@ jobs:
             tg_tags_staging: "#Anyakernel #staging #vanilla #gki510"
 
     steps:
-      # ── Gate ──────────────────────────────────────────────────────────────
-      # Skip this matrix leg early if the selected build_type doesn't match.
+      # Step 1: Filter matrix entries based on selected build_type
       - name: Evaluate build target
         id: gate
         run: |
@@ -71,9 +70,7 @@ jobs:
             echo "run=false" >> $GITHUB_OUTPUT
           fi
 
-      # ── Environment ───────────────────────────────────────────────────────
-      # Derive all branch-dependent naming variables up front so every
-      # subsequent step reads from $GITHUB_ENV without conditionals.
+      # Step 2: Set environment variables (branch dependent)
       - name: Resolve build environment
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -97,7 +94,7 @@ jobs:
             } >> $GITHUB_ENV
           fi
 
-      # Resolve toolchain URL, extraction strategy, and cache key.
+      # Step 3: Resolve toolchain URL, layout, and cache key
       - name: Resolve toolchain
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -124,17 +121,19 @@ jobs:
             echo "CLANG_CACHE_KEY=$DIR"
           } >> $GITHUB_ENV
 
-      # ── Setup ─────────────────────────────────────────────────────────────
+      # Step 4: Checkout repository
       - name: Checkout
         if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
 
+      # Step 5: Free up disk space
       - name: Reclaim disk space
         if: steps.gate.outputs.run == 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc
           sudo apt-get clean -q
 
+      # Step 6: Install required packages
       - name: Install build dependencies
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -144,7 +143,7 @@ jobs:
             libelf-dev libssl-dev python3-requests \
             wget zip
 
-      # ── Toolchain ─────────────────────────────────────────────────────────
+      # Step 7: Restore toolchain from cache
       - name: Restore toolchain cache
         if: steps.gate.outputs.run == 'true'
         id: cache-clang
@@ -153,9 +152,7 @@ jobs:
           path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
           key: ${{ env.CLANG_CACHE_KEY }}
 
-      # Two extraction strategies:
-      #   flat   — archive already contains a top-level named directory (LLVM dist tarballs).
-      #   wrap   — archive dumps files at root; we create the target directory ourselves.
+      # Step 8: Download toolchain if not cached
       - name: Download toolchain
         if: steps.gate.outputs.run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
@@ -170,19 +167,19 @@ jobs:
             rm  -f  clang.tar.gz
           fi
 
+      # Step 9: Export toolchain path
       - name: Export toolchain path
         if: steps.gate.outputs.run == 'true'
         run: echo "CLANG_PATH=$(pwd)/$CLANG_DIR/bin" >> $GITHUB_ENV
 
-      # ── Source ────────────────────────────────────────────────────────────
-      # Strip any accidental whitespace from the secret before passing to git.
+      # Step 10: Clone kernel source
       - name: Clone kernel source
         if: steps.gate.outputs.run == 'true'
         run: |
           KSRC="$(echo '${{ secrets.KERNEL_SOURCE }}' | xargs)"
           git clone --branch "$KERNEL_BRANCH" --depth=1 "$KSRC" kernel
 
-      # ── KernelSU-Next + SUSFS integration (susfs variant only) ────────────
+      # Step 11: KernelSU-Next integration (only for susfs type)
       - name: Integrate KernelSU-Next
         if: steps.gate.outputs.run == 'true' && matrix.type == 'susfs'
         run: |
@@ -192,6 +189,7 @@ jobs:
             | bash -s dev-susfs
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> $GITHUB_ENV
 
+      # Step 12: SUSFS integration
       - name: Integrate SUSFS
         if: steps.gate.outputs.run == 'true' && matrix.type == 'susfs'
         run: |
@@ -207,13 +205,14 @@ jobs:
           cp -R "$PATCHES/include/"* ./include/
           patch -p1 --forward < "$PATCHES"/*.patch || true
 
+      # Step 13: Apply all-managers patch
       - name: Apply all-managers patch
         if: steps.gate.outputs.run == 'true' && matrix.type == 'susfs'
         run: |
           curl -LSs "${{ secrets.PATCH_URL }}" -o /tmp/allmanager.patch
           patch -p1 --forward -d kernel/KernelSU-Next < /tmp/allmanager.patch
 
-      # ── Config ────────────────────────────────────────────────────────────
+      # Step 14: Inject defconfig overlays
       - name: Inject defconfig overlay
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -224,7 +223,7 @@ jobs:
             printf '%s\n' "${{ secrets.CONFIG_LINES_VANILLA }}" >> "$DEFCONFIG"
           fi
 
-      # ── Build ─────────────────────────────────────────────────────────────
+      # Step 15: Compile kernel
       - name: Compile
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -238,6 +237,7 @@ jobs:
           "${MAKE[@]}" gki_defconfig
           "${MAKE[@]}" -j"$(nproc --all)" Image
 
+      # Step 16: Collect build metadata
       - name: Collect build metadata
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -250,7 +250,7 @@ jobs:
             echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
           } >> $GITHUB_ENV
 
-      # ── Artifact ──────────────────────────────────────────────────────────
+      # Step 17: Package flashable ZIP
       - name: Package flashable ZIP
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -258,9 +258,7 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image ak3/
           cd ak3 && zip -r9 "../$ZIP_NAME" . -x "*.git*" "*.github*"
 
-      # ── Publish ───────────────────────────────────────────────────────────
-      # Send the flashable ZIP directly to Telegram with a structured caption.
-      # All metadata is passed as explicit env vars — no shell heredoc tricks.
+      # Step 18: Upload to Telegram
       - name: Upload to Telegram
         if: steps.gate.outputs.run == 'true'
         env:

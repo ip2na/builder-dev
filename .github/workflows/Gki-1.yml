@@ -1,10 +1,18 @@
+# =============================================================================
+# Valeryn Kernel — Continuous Integration
+#
+# Targets : Xiaomi POCO M3 / Redmi 9T (SM6115 · Snapdragon 662)
+# Variants : KernelSU-Next (hookless) · Vanilla
+# Toolchain : Greenforce Clang 22.1.4
+# =============================================================================
+
 name: Valeryn Kernel — CI
 
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Kernel branch"
+        description: Kernel source branch
         required: true
         default: staging
         type: choice
@@ -12,22 +20,35 @@ on:
           - staging
           - main
 
-# ---------------------------------------------------------------------------
-# Global constants — toolchain is fixed for this kernel target
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Environment — toolchain revision is pinned for reproducible builds
+# -----------------------------------------------------------------------------
 env:
-  CLANG_FILE: gf-clang-22.1.4-20260410
-  CLANG_URL: https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz
+  CLANG_TAG:  gf-clang-22.1.4-20260410
+  CLANG_URL:  https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz
+  KERNEL_REPO: https://github.com/ip2na/anya_xiaomi_sm6115.git
+  AK3_REPO:    https://github.com/ip2na/Anykernel3.git
+  AK3_BRANCH:  gki-1.0
 
 jobs:
   build:
-    name: "sm6115 · ${{ github.event.inputs.branch }}"
+    name: SM6115 · ${{ github.event.inputs.branch }} · ${{ matrix.variant }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - ksu
+          - vanilla
 
-    # -------------------------------------------------------------------------
+    # =========================================================================
     # Steps
-    # -------------------------------------------------------------------------
+    # =========================================================================
     steps:
+
+      # -----------------------------------------------------------------------
+      # 1. Prepare runner environment
+      # -----------------------------------------------------------------------
       - name: Reclaim disk space
         run: |
           sudo rm -rf \
@@ -46,55 +67,77 @@ jobs:
             git curl wget bc bison flex \
             libssl-dev libelf-dev zip cpio
 
+      # -----------------------------------------------------------------------
+      # 2. Toolchain
+      # -----------------------------------------------------------------------
       - name: Restore toolchain cache
         id: cache-clang
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/${{ env.CLANG_FILE }}
-          key: ${{ env.CLANG_FILE }}
+          path: ${{ github.workspace }}/${{ env.CLANG_TAG }}
+          key:  ${{ env.CLANG_TAG }}
 
       - name: Download and extract Clang
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$CLANG_FILE"
+          mkdir -p "$CLANG_TAG"
           wget -q -O clang.tar.gz "$CLANG_URL"
-          tar -xf clang.tar.gz -C "$CLANG_FILE"
+          tar -xf clang.tar.gz -C "$CLANG_TAG"
           rm clang.tar.gz
 
+      # -----------------------------------------------------------------------
+      # 3. Source acquisition
+      # -----------------------------------------------------------------------
       - name: Clone kernel source
         run: |
           git clone \
             --branch "${{ github.event.inputs.branch }}" \
             --depth=1 \
-            https://github.com/ip2na/anya_xiaomi_sm6115.git \
+            "$KERNEL_REPO" \
             kernel
 
-      # KernelSU Next hookless — no fs-hook modifications to the kernel tree
-      - name: Integrate KernelSU Next (hookless)
+      # -----------------------------------------------------------------------
+      # 4. KernelSU Next integration (KSU variant only)
+      # -----------------------------------------------------------------------
+      - name: Integrate KernelSU Next — hookless
+        if: matrix.variant == 'ksu'
         working-directory: kernel
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/Sorayukii/KernelSU-Next/stable/kernel/setup.sh" \
             | bash -s hookless
 
-          echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
+          echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" \
+            >> "$GITHUB_ENV"
 
-      # Append via printf to avoid heredoc quoting / interpolation issues
+      - name: Set KSU metadata placeholder
+        if: matrix.variant == 'vanilla'
+        run: echo "KSU_COMMIT=N/A" >> "$GITHUB_ENV"
+
+      # -----------------------------------------------------------------------
+      # 5. Defconfig overlay injection
+      # -----------------------------------------------------------------------
       - name: Apply defconfig overlay
         run: |
           CONFIG="kernel/arch/arm64/configs/vendor/bengal-perf_defconfig"
-          printf '%s\n' "${{ secrets.VALERYN_CONFIG_LINES }}" >> "$CONFIG"
-          echo "--- tail of defconfig ---"
+
+          if [[ "${{ matrix.variant }}" == "ksu" ]]; then
+            printf '%s\n' "${{ secrets.VALERYN_CONFIG_LINES_KSU }}" >> "$CONFIG"
+          else
+            printf '%s\n' "${{ secrets.VALERYN_CONFIG_LINES_VANILLA }}" >> "$CONFIG"
+          fi
+
+          echo "--- defconfig tail (last 20 lines) ---"
           tail -20 "$CONFIG"
 
       # -----------------------------------------------------------------------
-      # Compile
+      # 6. Compilation
       # -----------------------------------------------------------------------
       - name: Compile kernel
         working-directory: kernel
         run: |
           export TZ="Asia/Jakarta"
-          export PATH="${{ github.workspace }}/${{ env.CLANG_FILE }}/bin:$PATH"
+          export PATH="${{ github.workspace }}/${{ env.CLANG_TAG }}/bin:$PATH"
           export KBUILD_BUILD_USER="builder-dev"
           export KBUILD_BUILD_HOST="anyaprjkt"
 
@@ -110,86 +153,113 @@ jobs:
           make "${MAKE_ARGS[@]}" -j"$(nproc --all)" Image.gz dtbs
 
       # -----------------------------------------------------------------------
-      # Collect metadata for release notes and Telegram caption
+      # 7. Build metadata collection
       # -----------------------------------------------------------------------
       - name: Collect build metadata
         run: |
-          CLANG_BIN="${{ github.workspace }}/${{ env.CLANG_FILE }}/bin"
+          CLANG_BIN="${{ github.workspace }}/${{ env.CLANG_TAG }}/bin"
+          VARIANT_UPPER="$(echo '${{ matrix.variant }}' | tr '[:lower:]' '[:upper:]')"
+
           {
             echo "GIT_BRANCH=$(git -C kernel rev-parse --abbrev-ref HEAD)"
             echo "GIT_COMMIT=$(git -C kernel log -1 --pretty=format:'%s (%an)')"
             echo "KERNEL_VER=$(sed 's/.*\"\(.*\)\".*/\1/' kernel/out/include/generated/utsrelease.h)"
             echo "COMPILER=$("$CLANG_BIN/clang" --version | head -1)"
             echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
-            echo "ZIP_NAME=Valeryn-SM6115-${{ github.run_number }}.zip"
+            echo "ZIP_NAME=Valeryn-SM6115-${VARIANT_UPPER}-${{ github.run_number }}.zip"
           } >> "$GITHUB_ENV"
 
       # -----------------------------------------------------------------------
-      # Package AnyKernel3 flashable ZIP
+      # 8. AnyKernel3 packaging
       # -----------------------------------------------------------------------
       - name: Package flashable ZIP
         run: |
-          git clone --depth=1 -b gki-1.0 \
-            https://github.com/ip2na/Anykernel3.git \
+          git clone --depth=1 \
+            --branch "$AK3_BRANCH" \
+            "$AK3_REPO" \
             ak3
 
           mkdir -p ak3/dtbs
           cp kernel/out/arch/arm64/boot/Image.gz ak3/
 
-          # DTBs — tolerate missing files gracefully
           find kernel/out/arch/arm64/boot/dts \
             -name "*.dtb" \
             -exec cp {} ak3/dtbs/ \; 2>/dev/null || true
 
-          # DTBO — optional, not all builds produce it
           [[ -f kernel/out/arch/arm64/boot/dtbo.img ]] && \
             cp kernel/out/arch/arm64/boot/dtbo.img ak3/
 
           cd ak3
-          zip -r9 "$ZIP_NAME" . --exclude '*.git*' --exclude '*.github*'
+          zip -r9 "$ZIP_NAME" . \
+            --exclude '*.git*' \
+            --exclude '*.github*'
           ls -lh "$ZIP_NAME"
 
       # -----------------------------------------------------------------------
-      # Upload ZIP to Telegram via Python (avoids shell interpolation issues)
+      # 9. Telegram distribution
       # -----------------------------------------------------------------------
-      - name: Publish to Telegram
+      - name: Publish build to Telegram
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_TOKEN:  ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ZIP_PATH: ${{ github.workspace }}/ak3/${{ env.ZIP_NAME }}
+          ZIP_PATH:  ${{ github.workspace }}/ak3/${{ env.ZIP_NAME }}
           KSU_COMMIT: ${{ env.KSU_COMMIT }}
+          VARIANT:    ${{ matrix.variant }}
         run: |
           python3 - <<'PYEOF'
           import os
-          import sys
           import requests
 
-          caption = "\n".join([
-            "<b>Valeryn Kernel — SM6115</b>",
-            f"🌱 <b>Branch:</b> <code>{os.environ['GIT_BRANCH']}</code>",
-            f"🐧 <b>Linux version:</b> <code>{os.environ['KERNEL_VER']}</code>",
-            f"📆 <b>Build date:</b> <code>{os.environ['BUILD_DATE']}</code>",
-            f"♻️ <b>Latest commit:</b> {os.environ['GIT_COMMIT']}",
-            f"🔐 <b>KSU commit:</b> {os.environ['KSU_COMMIT']}",
-            f"⚙️ <b>Compiler:</b> {os.environ['COMPILER']}",
-          ])
+          variant = os.environ["VARIANT"]
 
+          if variant == "ksu":
+              variant_line = "🔐 <b>Variant:</b> KernelSU Next (Hookless)"
+              ksu_line     = f"🔑 <b>KSU commit:</b> {os.environ['KSU_COMMIT']}"
+              hashtags     = "#chime #pocom3 #redmi9t #ksu"
+          else:
+              variant_line = "🍦 <b>Variant:</b> Vanilla"
+              ksu_line     = None
+              hashtags     = "#chime #pocom3 #redmi9t #vanilla"
+
+          lines = [
+              "<b>Valeryn Kernel — SM6115</b>",
+              "",
+              f"🌿 <b>Branch:</b> <code>{os.environ['GIT_BRANCH']}</code>",
+              f"🐧 <b>Kernel version:</b> <code>{os.environ['KERNEL_VER']}</code>",
+              f"📅 <b>Build date:</b> <code>{os.environ['BUILD_DATE']}</code>",
+              f"📝 <b>Latest commit:</b> {os.environ['GIT_COMMIT']}",
+              variant_line,
+          ]
+
+          if ksu_line:
+              lines.append(ksu_line)
+
+          lines += [
+              f"⚙️ <b>Compiler:</b> {os.environ['COMPILER']}",
+              "",
+              hashtags,
+          ]
+
+          caption  = "\n".join(lines)
           zip_path = os.environ["ZIP_PATH"]
-          api_url  = f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendDocument"
+          api_url  = (
+              f"https://api.telegram.org"
+              f"/bot{os.environ['TELEGRAM_TOKEN']}/sendDocument"
+          )
 
           print(f"Uploading: {zip_path}")
 
           with open(zip_path, "rb") as fh:
-            response = requests.post(
-              api_url,
-              data={
-                "chat_id":    os.environ["TELEGRAM_CHAT_ID"],
-                "parse_mode": "HTML",
-                "caption":    caption,
-              },
-              files={"document": fh},
-              timeout=300,
-            )
+              response = requests.post(
+                  api_url,
+                  data={
+                      "chat_id":    os.environ["TELEGRAM_CHAT_ID"],
+                      "parse_mode": "HTML",
+                      "caption":    caption,
+                  },
+                  files={"document": fh},
+                  timeout=300,
+              )
 
           print(f"HTTP {response.status_code}")
           print(response.text)
@@ -197,11 +267,11 @@ jobs:
           PYEOF
 
       # -----------------------------------------------------------------------
-      # On failure: preserve the ZIP (if it exists) for manual inspection
+      # 10. Failure artifact preservation
       # -----------------------------------------------------------------------
       - name: Upload artifact on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-zip-failed
+          name: valeryn-sm6115-${{ matrix.variant }}-failed-run${{ github.run_number }}
           path: ak3/${{ env.ZIP_NAME }}

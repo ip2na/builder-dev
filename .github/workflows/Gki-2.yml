@@ -244,10 +244,10 @@ jobs:
           echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
           # Apply SUSFS file overlays and kernel patch
-          PATCHES=".susfs/kernel_patches"
-          cp -R "$PATCHES/fs/"      ./fs/
-          cp -R "$PATCHES/include/" ./include/
-          patch -p1 --forward < "$PATCHES"/*.patch || true
+          PATCHES="$(pwd)/.susfs/kernel_patches"
+          cp -R "$PATCHES/fs/"* ./fs/
+          cp -R "$PATCHES/include/"* ./include/
+          patch -p1 < "$PATCHES"/*.patch
 
       - name: Apply all-managers patch
         if: steps.gate.outputs.should_run == 'true' && matrix.type == 'susfs'

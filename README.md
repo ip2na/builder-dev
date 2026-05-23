@@ -34,6 +34,7 @@ Flashing a custom kernel may void your warranty. Backup your data before proceed
 ## Credits
 
 - [KernelSU-Next](https://github.com/pershoot/KernelSU-Next) by pershoot
+- [KernelSU-Next (Hookless)](https://github.com/Sorayukii/KernelSU-Next/tree/hookless) by Sorayukii
 - [SUSFS4KSU](https://gitlab.com/simonpunk/susfs4ksu/-/tree/gki-android12-5.10-dev) by simonpunk
 - [AnyKernel3](https://github.com/osm0sis/AnyKernel3) by osm0sis
 - [Greenforce Clang](https://github.com/greenforce-project/clang-llvm) by greenforce-project

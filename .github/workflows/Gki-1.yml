@@ -3,7 +3,7 @@
 #
 # Device  : Xiaomi POCO M3 / Redmi 9T (SM6115 · Snapdragon 662)
 # Variants: KernelSU-Next (hookless) · Vanilla
-# Toolchain: Google Clang-r584948b
+# Toolchain: Gf-clang
 # =============================================================================
 
 name: Valeryn Kernel — CI
@@ -30,8 +30,8 @@ on:
           - vanilla
 
 env:
-  CLANG_TAG:   clang-r584948b
-  CLANG_URL:   https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r584948b-14863223/clang-r584948b.tar.gz
+  CLANG_TAG:   gf-clang-22.1.4-20260410
+  CLANG_URL:   https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz
   KERNEL_REPO: https://github.com/ip2na/anya_xiaomi_sm6115.git
   AK3_REPO:    https://github.com/ip2na/Anykernel3.git
   AK3_BRANCH:  gki-1.0

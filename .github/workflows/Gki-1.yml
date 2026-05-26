@@ -105,7 +105,7 @@ jobs:
         run: |
           curl -LSs \
             "https://raw.githubusercontent.com/Sorayukii/KernelSU-Next/stable/kernel/setup.sh" \
-            | bash -s hookless
+            | bash -s hookless-staging
 
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" \
             >> "$GITHUB_ENV"

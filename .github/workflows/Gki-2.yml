@@ -1,11 +1,3 @@
-# =============================================================================
-# Anya Kernel — Matrix CI
-# Targets : GKI 5.10 · Universal
-# Variants : KSU+SUSFS · Vanilla
-# Toolchains: Greenforce · LLVM (kernel.org) · ZyC · AOSP (ip2na mirror)
-#             All toolchains auto-detect latest release at build time.
-# =============================================================================
-
 name: Anya Kernel — Matrix CI
 
 on:
@@ -43,7 +35,10 @@ on:
           - zyc
           - aosp
 
-concurrency: 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: "[${{ matrix.name }}] · ${{ github.event.inputs.clang }} · ${{ github.event.inputs.branch }}"
@@ -77,7 +72,6 @@ jobs:
             telegram_tags_staging: "#Anyakernel #staging #vanilla #gki510"
             release_tags_main: "#Anyakernel #vanilla #gki-5.10"
             release_tags_staging: "#Anyakernel #staging #vanilla #gki-5.10"
-
 
     steps:
       - name: Evaluate build target
@@ -122,24 +116,12 @@ jobs:
             echo "RELEASE_TAGS=$RELEASE_TAGS"
           } >> "$GITHUB_ENV"
 
-      # -------------------------------------------------------------------------
-      # Toolchain resolution — all sources auto-detect latest release
-      #
-      #   greenforce  → github.com/greenforce-project/greenforce_clang (GitHub API)
-      #   llvm        → mirrors.edge.kernel.org/pub/tools/llvm/files/  (HTML scrape)
-      #   zyc         → github.com/ZyCromerZ/Clang                     (GitHub API)
-      #   aosp        → github.com/ip2na/aosp_clang_mirror             (GitHub API)
-      # -------------------------------------------------------------------------
       - name: Resolve toolchain
         if: steps.gate.outputs.should_run == 'true'
         run: |
-          # Helper: fetch latest release asset URL + tag from a GitHub repo.
-          # Usage: gh_latest_asset <owner/repo> <suffix>
           gh_latest_asset() {
-            local REPO="$1" EXT="$2"
-            local PAYLOAD
+            local REPO="$1" EXT="$2" PAYLOAD TAG URL
             PAYLOAD=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
-            local TAG URL
             TAG=$(echo "$PAYLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
             URL=$(echo "$PAYLOAD" | python3 -c "
           import sys, json
@@ -151,7 +133,6 @@ jobs:
           }
 
           case "${{ github.event.inputs.clang }}" in
-
             greenforce)
               RESULT=$(gh_latest_asset "greenforce-project/greenforce_clang" ".tar.gz")
               TAG="${RESULT%%|*}"
@@ -159,9 +140,7 @@ jobs:
               CLANG_TYPE="dir"
               CLANG_CACHE_KEY="greenforce-clang-${TAG}"
               ;;
-
             llvm)
-              # Scrape the directory index for the highest semver tarball.
               LLVM_VER=$(curl -fsSL https://mirrors.edge.kernel.org/pub/tools/llvm/files/ \
                 | grep -oP 'llvm-\K[\d.]+(?=-x86_64\.tar\.gz)' \
                 | sort -V | tail -1)
@@ -169,7 +148,6 @@ jobs:
               CLANG_TYPE="flat"
               CLANG_CACHE_KEY="llvm-${LLVM_VER}"
               ;;
-
             zyc)
               RESULT=$(gh_latest_asset "ZyCromerZ/Clang" ".tar.gz")
               TAG="${RESULT%%|*}"
@@ -177,7 +155,6 @@ jobs:
               CLANG_TYPE="dir"
               CLANG_CACHE_KEY="zyc-clang-${TAG}"
               ;;
-
             aosp)
               RESULT=$(gh_latest_asset "ip2na/aosp_clang_mirror" ".tar.gz")
               TAG="${RESULT%%|*}"
@@ -185,17 +162,11 @@ jobs:
               CLANG_TYPE="dir"
               CLANG_CACHE_KEY="aosp-clang-${TAG}"
               ;;
-
           esac
 
-          # Strip both .tar.gz and .tar.xz to get the bare directory name.
           CLANG_DIR="$(basename "$CLANG_URL")"
           CLANG_DIR="${CLANG_DIR%.tar.gz}"
           CLANG_DIR="${CLANG_DIR%.tar.xz}"
-
-          echo "Toolchain : ${{ github.event.inputs.clang }}"
-          echo "Cache key : ${CLANG_CACHE_KEY}"
-          echo "URL       : ${CLANG_URL}"
 
           {
             echo "CLANG_URL=$CLANG_URL"
@@ -203,7 +174,7 @@ jobs:
             echo "CLANG_DIR=$CLANG_DIR"
             echo "CLANG_CACHE_KEY=$CLANG_CACHE_KEY"
           } >> "$GITHUB_ENV"
-          
+
       - name: Set release tag
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -242,19 +213,16 @@ jobs:
       - name: Download and extract toolchain
         if: steps.gate.outputs.should_run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          ARCHIVE="clang-dl.tar.gz"
-          wget -q -O "$ARCHIVE" "$CLANG_URL"
+          wget -q -O clang-dl.tar.gz "$CLANG_URL"
 
           if [[ "$CLANG_TYPE" == "flat" ]]; then
-            # Archive extracts into its own named top-level directory.
-            tar -xzf "$ARCHIVE"
+            tar -xzf clang-dl.tar.gz
           else
-            # Flat tarball — wrap contents in $CLANG_DIR.
             mkdir -p "$CLANG_DIR"
-            tar -xzf "$ARCHIVE" -C "$CLANG_DIR"
+            tar -xzf clang-dl.tar.gz -C "$CLANG_DIR"
           fi
 
-          rm "$ARCHIVE"
+          rm clang-dl.tar.gz
 
       - name: Export toolchain to PATH
         if: steps.gate.outputs.should_run == 'true'
@@ -288,8 +256,8 @@ jobs:
           echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
           PATCHES="$(pwd)/.susfs/kernel_patches"
-          cp -R "$PATCHES/fs/"*       ./fs/
-          cp -R "$PATCHES/include/"*  ./include/
+          cp -R "$PATCHES/fs/"*      ./fs/
+          cp -R "$PATCHES/include/"* ./include/
           patch -p1 < "$PATCHES"/*.patch
 
       - name: Apply all-managers patch
@@ -346,7 +314,7 @@ jobs:
           git clone --depth=1 -b gki-2.0 "${{ secrets.AK3_REPO }}" ak3
           cp kernel/out/arch/arm64/boot/Image ak3/
           cd ak3 && zip -r9 "$ZIP_NAME" . --exclude '*.git*' --exclude '*.github*'
- 
+
       - name: Prune old GitHub Releases
         if: steps.gate.outputs.should_run == 'true'
         env:
@@ -359,7 +327,6 @@ jobs:
             --jq 'sort_by(.createdAt) | reverse | .[25:] | .[].tagName')
 
           for TAG in $STALE; do
-            echo "Deleting stale release: $TAG"
             gh release delete "$TAG" \
               --repo AnyaKernel/Kernel-Release \
               --yes --cleanup-tag 2>/dev/null || true
@@ -415,43 +382,54 @@ jobs:
 
       - name: Send Telegram notification
         if: steps.gate.outputs.should_run == 'true'
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
           RELEASE_URL="https://github.com/AnyaKernel/Kernel-Release/releases/tag/$RELEASE_TAG"
 
-          EXTRA_INFO=""
           if [[ "${{ matrix.type }}" == "susfs" ]]; then
-            EXTRA_INFO="
-          🔐 <b>KSU commit:</b> $KSU_COMMIT
-          🛡️ <b>SUSFS commit:</b> $SUSFS_COMMIT"
+            printf 'EXTRA_INFO=\n🔐 <b>KSU commit:</b> %s\n🛡️ <b>SUSFS commit:</b> %s\n' \
+              "$KSU_COMMIT" "$SUSFS_COMMIT" >> "$GITHUB_ENV"
+          else
+            echo "EXTRA_INFO=" >> "$GITHUB_ENV"
           fi
 
-          STAGING_HEADER=""
           if [[ "$IS_STAGING" == "true" ]]; then
-            STAGING_HEADER="⚠️ <b>[STAGING BUILD]</b>
-
-          "
+            echo "STAGING_HEADER=⚠️ <b>[STAGING BUILD]</b>" >> "$GITHUB_ENV"
+          else
+            echo "STAGING_HEADER=" >> "$GITHUB_ENV"
           fi
+
+          export RELEASE_URL
 
           python3 - <<'PYEOF'
           import os, urllib.request, urllib.parse
 
-          msg = f"""{os.environ.get('STAGING_HEADER', '')}<b>Anya Kernel — {os.environ['TELEGRAM_VERSION']}</b>
-          🌿 <b>Branch:</b> <code>{os.environ['GIT_BRANCH']}</code>
-          🐧 <b>Linux version:</b> <code>{os.environ['KERNEL_VER']}</code>
-          📆 <b>Build date:</b> <code>{os.environ['BUILD_DATE']}</code>
-          🦎 <b>Variant:</b> {os.environ['TELEGRAM_VERSION']}
-          ♻️ <b>Latest commit:</b> {os.environ['GIT_COMMIT']}{os.environ.get('EXTRA_INFO', '')}
-          ⚙️ <b>Compiler:</b> {os.environ['COMPILER']}
+          staging = os.environ.get("STAGING_HEADER", "")
+          extra   = os.environ.get("EXTRA_INFO", "")
+          prefix  = f"{staging}\n\n" if staging else ""
 
-          {os.environ['TELEGRAM_TAGS']}
-
-          📥 <b>Download:</b> <a href="{os.environ['RELEASE_URL']}">GitHub Release</a>"""
+          msg = (
+            f"{prefix}"
+            f"<b>Anya Kernel \u2014 {os.environ['TELEGRAM_VERSION']}</b>\n"
+            f"\U0001f331 <b>Branch:</b> <code>{os.environ['GIT_BRANCH']}</code>\n"
+            f"\U0001f427 <b>Linux version:</b> <code>{os.environ['KERNEL_VER']}</code>\n"
+            f"\U0001f4c6 <b>Build date:</b> <code>{os.environ['BUILD_DATE']}</code>\n"
+            f"\U0001f98e <b>Variant:</b> {os.environ['TELEGRAM_VERSION']}\n"
+            f"\u267b\ufe0f <b>Latest commit:</b> {os.environ['GIT_COMMIT']}"
+            f"{extra}\n"
+            f"\u2699\ufe0f <b>Compiler:</b> {os.environ['COMPILER']}\n\n"
+            f"{os.environ['TELEGRAM_TAGS']}\n\n"
+            f"\U0001f4e5 <b>Download:</b> "
+            f"<a href=\"{os.environ['RELEASE_URL']}\">GitHub Release</a>"
+          )
 
           payload = urllib.parse.urlencode({
-            "chat_id": os.environ["CHAT_ID"],
-            "parse_mode": "HTML",
+            "chat_id":                  os.environ["CHAT_ID"],
+            "parse_mode":               "HTML",
             "disable_web_page_preview": "true",
-            "text": msg,
+            "text":                     msg,
           }).encode()
 
           req = urllib.request.Request(
@@ -462,7 +440,3 @@ jobs:
           with urllib.request.urlopen(req) as resp:
             print(resp.read().decode())
           PYEOF
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          RELEASE_URL: "https://github.com/AnyaKernel/Kernel-Release/releases/tag/${{ env.RELEASE_TAG }}"

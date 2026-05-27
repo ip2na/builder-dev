@@ -132,7 +132,7 @@ jobs:
               CLANG_TYPE="dir"
               ;;
             llvm)
-              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.4-x86_64.tar.gz"
+              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.6-x86_64.tar.gz"
               CLANG_TYPE="flat"
               ;;
             zyc)

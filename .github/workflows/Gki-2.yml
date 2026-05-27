@@ -389,14 +389,22 @@ jobs:
           RELEASE_URL="https://github.com/AnyaKernel/Kernel-Release/releases/tag/$RELEASE_TAG"
 
           if [[ "${{ matrix.type }}" == "susfs" ]]; then
-            printf 'EXTRA_INFO=\n🔐 <b>KSU commit:</b> %s\n🛡️ <b>SUSFS commit:</b> %s\n' \
-              "$KSU_COMMIT" "$SUSFS_COMMIT" >> "$GITHUB_ENV"
+            {
+              echo "EXTRA_INFO<<__EOF__"
+              echo "🔐 <b>KSU commit:</b> $KSU_COMMIT"
+              echo "🛡️ <b>SUSFS commit:</b> $SUSFS_COMMIT"
+              echo "__EOF__"
+            } >> "$GITHUB_ENV"
           else
             echo "EXTRA_INFO=" >> "$GITHUB_ENV"
           fi
 
           if [[ "$IS_STAGING" == "true" ]]; then
-            echo "STAGING_HEADER=⚠️ <b>[STAGING BUILD]</b>" >> "$GITHUB_ENV"
+            {
+              echo "STAGING_HEADER<<__EOF__"
+              echo "⚠️ <b>[STAGING BUILD]</b>"
+              echo "__EOF__"
+            } >> "$GITHUB_ENV"
           else
             echo "STAGING_HEADER=" >> "$GITHUB_ENV"
           fi

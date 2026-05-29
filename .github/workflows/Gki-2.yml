@@ -35,13 +35,12 @@ on:
           - zyc
           - aosp
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+# ---------------------------------------------------------------------------
+# Matrix definitions
+# ---------------------------------------------------------------------------
 jobs:
   build:
-    name: "[${{ matrix.name }}] · ${{ github.event.inputs.clang }} · ${{ github.event.inputs.branch }}"
+    name: "Build [${{ matrix.name }}]"
     runs-on: ubuntu-latest
 
     permissions:
@@ -73,7 +72,12 @@ jobs:
             release_tags_main: "#Anyakernel #vanilla #gki-5.10"
             release_tags_staging: "#Anyakernel #staging #vanilla #gki-5.10"
 
+    # -------------------------------------------------------------------------
+    # Steps
+    # -------------------------------------------------------------------------
     steps:
+      # Decide whether this matrix leg should execute based on the
+      # user-selected build_type input.
       - name: Evaluate build target
         id: gate
         run: |
@@ -85,6 +89,8 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Resolve branch-specific variables once so every subsequent step can
+      # reference them cleanly from $GITHUB_ENV.
       - name: Resolve branch variables
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -116,69 +122,44 @@ jobs:
             echo "RELEASE_TAGS=$RELEASE_TAGS"
           } >> "$GITHUB_ENV"
 
-      - name: Resolve toolchain
+      # Map the toolchain input to its download URL and extraction strategy.
+      - name: Configure toolchain
         if: steps.gate.outputs.should_run == 'true'
         run: |
-          gh_latest_asset() {
-            local REPO="$1" EXT="$2" PAYLOAD TAG URL
-            PAYLOAD=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
-            TAG=$(echo "$PAYLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
-            URL=$(echo "$PAYLOAD" | python3 -c "
-          import sys, json
-          r = json.load(sys.stdin)
-          asset = next(a for a in r['assets'] if a['name'].endswith('${EXT}'))
-          print(asset['browser_download_url'])
-          ")
-            echo "${TAG}|${URL}"
-          }
-
           case "${{ github.event.inputs.clang }}" in
             greenforce)
-              RESULT=$(gh_latest_asset "greenforce-project/greenforce_clang" ".tar.gz")
-              TAG="${RESULT%%|*}"
-              CLANG_URL="${RESULT##*|}"
+              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
               CLANG_TYPE="dir"
-              CLANG_CACHE_KEY="greenforce-clang-${TAG}"
               ;;
             llvm)
-              LLVM_VER=$(curl -fsSL https://mirrors.edge.kernel.org/pub/tools/llvm/files/ \
-                | grep -oP 'llvm-\K[\d.]+(?=-x86_64\.tar\.gz)' \
-                | sort -V | tail -1)
-              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-${LLVM_VER}-x86_64.tar.gz"
+              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.6-x86_64.tar.gz"
               CLANG_TYPE="flat"
-              CLANG_CACHE_KEY="llvm-${LLVM_VER}"
               ;;
             zyc)
-              RESULT=$(gh_latest_asset "ZyCromerZ/Clang" ".tar.gz")
-              TAG="${RESULT%%|*}"
-              CLANG_URL="${RESULT##*|}"
+              CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250401-release/Clang-20.0.0git-20250401.tar.gz"
               CLANG_TYPE="dir"
-              CLANG_CACHE_KEY="zyc-clang-${TAG}"
               ;;
             aosp)
-              RESULT=$(gh_latest_asset "ip2na/aosp_clang_mirror" ".tar.gz")
-              TAG="${RESULT%%|*}"
-              CLANG_URL="${RESULT##*|}"
+              CLANG_URL="https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r584948b-14863223/clang-r584948b.tar.gz"
               CLANG_TYPE="dir"
-              CLANG_CACHE_KEY="aosp-clang-${TAG}"
               ;;
           esac
 
-          CLANG_DIR="$(basename "$CLANG_URL")"
-          CLANG_DIR="${CLANG_DIR%.tar.gz}"
-          CLANG_DIR="${CLANG_DIR%.tar.xz}"
+          CLANG_FILENAME="$(basename "$CLANG_URL" .tar.gz)"
 
           {
             echo "CLANG_URL=$CLANG_URL"
             echo "CLANG_TYPE=$CLANG_TYPE"
-            echo "CLANG_DIR=$CLANG_DIR"
-            echo "CLANG_CACHE_KEY=$CLANG_CACHE_KEY"
+            echo "CLANG_DIR=$CLANG_FILENAME"
+            echo "CLANG_CACHE_KEY=$CLANG_FILENAME"
           } >> "$GITHUB_ENV"
 
       - name: Checkout repository
         if: steps.gate.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
+      # Compute the release tag here so it is available for both the release
+      # publish step and the Telegram notification.
       - name: Set release tag
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -210,21 +191,23 @@ jobs:
           path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
           key: ${{ env.CLANG_CACHE_KEY }}
 
-      - name: Download and extract toolchain
+      - name: Download and extract Clang
         if: steps.gate.outputs.should_run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           if [[ "$CLANG_TYPE" == "flat" ]]; then
+            # Archive already extracts into a top-level named directory.
             wget -q "$CLANG_URL"
             tar -xzf "$(basename "$CLANG_URL")"
             rm "$(basename "$CLANG_URL")"
           else
+            # Archive is a flat tarball; wrap it in its own directory.
             mkdir -p "$CLANG_DIR"
             wget -q -O clang.tar.gz "$CLANG_URL"
             tar -xzf clang.tar.gz -C "$CLANG_DIR"
             rm clang.tar.gz
           fi
 
-      - name: Export toolchain to PATH
+      - name: Export Clang to PATH
         if: steps.gate.outputs.should_run == 'true'
         run: echo "CLANG_PATH=$(pwd)/$CLANG_DIR/bin" >> "$GITHUB_ENV"
 
@@ -237,17 +220,22 @@ jobs:
             "${{ secrets.KERNEL_SOURCE }}" \
             kernel
 
+      # -----------------------------------------------------------------------
+      # SUSFS variant — KernelSU Next integration
+      # -----------------------------------------------------------------------
       - name: Integrate KernelSU Next + SUSFS
         if: steps.gate.outputs.should_run == 'true' && matrix.type == 'susfs'
         run: |
           cd kernel
 
+          # Set up KernelSU Next (dev-susfs variant)
           curl -LSs \
             "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" \
             | bash -s dev-susfs
 
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
+          # Clone SUSFS patches for android12 GKI 5.10
           git clone --depth=1 \
             https://gitlab.com/simonpunk/susfs4ksu \
             -b gki-android12-5.10 \
@@ -255,6 +243,7 @@ jobs:
 
           echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
+          # Apply SUSFS file overlays and kernel patch
           PATCHES="$(pwd)/.susfs/kernel_patches"
           cp -R "$PATCHES/fs/"* ./fs/
           cp -R "$PATCHES/include/"* ./include/
@@ -266,6 +255,9 @@ jobs:
           curl -LSs "${{ secrets.PATCH_URL }}" -o /tmp/ksun-allmanager.patch
           patch -p1 --forward -d kernel/KernelSU-Next < /tmp/ksun-allmanager.patch
 
+      # -----------------------------------------------------------------------
+      # Defconfig overlay — appended via printf to avoid heredoc quoting issues
+      # -----------------------------------------------------------------------
       - name: Apply defconfig overlay
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -277,6 +269,9 @@ jobs:
             printf '%s\n' "${{ secrets.CONFIG_LINES_VANILLA }}" >> "$DEFCONFIG"
           fi
 
+      # -----------------------------------------------------------------------
+      # Compile
+      # -----------------------------------------------------------------------
       - name: Compile kernel
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -297,6 +292,9 @@ jobs:
           make "${MAKE_ARGS[@]}" gki_defconfig
           make "${MAKE_ARGS[@]}" -j"$(nproc --all)" Image
 
+      # -----------------------------------------------------------------------
+      # Collect build metadata for use in release notes and Telegram message
+      # -----------------------------------------------------------------------
       - name: Collect build metadata
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -308,6 +306,9 @@ jobs:
             echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
           } >> "$GITHUB_ENV"
 
+      # -----------------------------------------------------------------------
+      # Package AnyKernel3 flashable ZIP
+      # -----------------------------------------------------------------------
       - name: Package flashable ZIP
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -315,6 +316,9 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image ak3/
           cd ak3 && zip -r9 "$ZIP_NAME" . --exclude '*.git*' --exclude '*.github*'
 
+      # -----------------------------------------------------------------------
+      # Publish GitHub Release first so the download URL is ready for Telegram
+      # -----------------------------------------------------------------------
       - name: Prune old GitHub Releases
         if: steps.gate.outputs.should_run == 'true'
         env:
@@ -327,6 +331,7 @@ jobs:
             --jq 'sort_by(.createdAt) | reverse | .[25:] | .[].tagName')
 
           for TAG in $STALE; do
+            echo "Deleting stale release: $TAG"
             gh release delete "$TAG" \
               --repo AnyaKernel/Kernel-Release \
               --yes --cleanup-tag 2>/dev/null || true
@@ -380,6 +385,9 @@ jobs:
               --latest
           fi
 
+      # -----------------------------------------------------------------------
+      # Notify Telegram with a link to the release (no direct file upload)
+      # -----------------------------------------------------------------------
       - name: Send Telegram notification
         if: steps.gate.outputs.should_run == 'true'
         run: |

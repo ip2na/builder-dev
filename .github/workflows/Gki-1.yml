@@ -60,7 +60,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             git curl wget bc bison flex \
-            libssl-dev libelf-dev zip cpio
+            libssl-dev libelf-dev zip cpio \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
       - name: Resolve toolchain
         run: |
@@ -145,10 +146,11 @@ jobs:
 
           MAKE_ARGS=(
             ARCH=arm64
-            LLVM=1
-            LLVM_IAS=1
             O=out
+            CC=clang
             CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            CLANG_TRIPLE=aarch64-linux-gnu-
           )
 
           make "${MAKE_ARGS[@]}" vendor/bengal-perf_defconfig

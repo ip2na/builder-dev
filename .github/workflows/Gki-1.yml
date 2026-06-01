@@ -67,9 +67,13 @@ jobs:
           PAYLOAD=$(curl -fsSL "https://api.github.com/repos/greenforce-project/greenforce_clang/releases/latest")
           GF_TAG=$(echo "$PAYLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
           GF_URL=$(echo "$PAYLOAD" | python3 -c "
-          import sys, json
+          import sys, json, re
           r = json.load(sys.stdin)
-          asset = next(a for a in r['assets'] if a['name'].endswith('.tar.gz'))
+          assets = [a for a in r['assets'] if a['name'].endswith('.tar.gz')]
+          def clang_ver(a):
+              m = re.search(r'gf-clang-(\d+)', a['name'])
+              return int(m.group(1)) if m else -1
+          asset = max(assets, key=clang_ver)
           print(asset['browser_download_url'])
           ")
           GF_DIR="$(basename "$GF_URL" .tar.gz)"

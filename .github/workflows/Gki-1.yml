@@ -61,28 +61,25 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git curl wget bc bison flex \
             libssl-dev libelf-dev zip cpio \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            zstd
 
       - name: Resolve toolchain
         run: |
-          PAYLOAD=$(curl -fsSL "https://api.github.com/repos/greenforce-project/greenforce_clang/releases/latest")
-          GF_TAG=$(echo "$PAYLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
-          GF_URL=$(echo "$PAYLOAD" | python3 -c "
-          import sys, json, re
+          PAYLOAD=$(curl -fsSL "https://api.github.com/repos/Neutron-Toolchains/clang-build-catalogue/releases/latest")
+          NT_TAG=$(echo "$PAYLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
+          NT_URL=$(echo "$PAYLOAD" | python3 -c "
+          import sys, json
           r = json.load(sys.stdin)
-          assets = [a for a in r['assets'] if a['name'].endswith('.tar.gz')]
-          def clang_ver(a):
-              m = re.search(r'gf-clang-(\d+)', a['name'])
-              return int(m.group(1)) if m else -1
-          asset = max(assets, key=clang_ver)
+          asset = next(a for a in r['assets'] if a['name'].endswith('.tar.zst'))
           print(asset['browser_download_url'])
           ")
-          GF_DIR="$(basename "$GF_URL" .tar.gz)"
+          NT_DIR="$(basename "$NT_URL" .tar.zst)"
 
           {
-            echo "CLANG_TAG=$GF_TAG"
-            echo "CLANG_URL=$GF_URL"
-            echo "CLANG_DIR=$GF_DIR"
+            echo "CLANG_TAG=$NT_TAG"
+            echo "CLANG_URL=$NT_URL"
+            echo "CLANG_DIR=$NT_DIR"
           } >> "$GITHUB_ENV"
 
       - name: Restore toolchain cache
@@ -90,15 +87,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
-          key:  greenforce-clang-${{ env.CLANG_TAG }}
+          key:  neutron-clang-${{ env.CLANG_TAG }}
 
       - name: Download and extract Clang
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$CLANG_DIR"
-          wget -q -O clang.tar.gz "$CLANG_URL"
-          tar -xf clang.tar.gz -C "$CLANG_DIR"
-          rm clang.tar.gz
+          wget -q -O clang.tar.zst "$CLANG_URL"
+          tar -I zstd -xf clang.tar.zst -C "$CLANG_DIR"
+          rm clang.tar.zst
 
       - name: Clone kernel source
         run: |

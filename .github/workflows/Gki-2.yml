@@ -6,7 +6,7 @@ on:
       branch:
         description: "Kernel source branch"
         required: true
-        default: main
+        default: staging
         type: choice
         options:
           - main
@@ -21,15 +21,6 @@ on:
           - all
           - susfs
           - vanilla
-
-      clang:
-        description: "Clang toolchain"
-        required: true
-        default: neutron
-        type: choice
-        options:
-          - neutron
-          - aosp
 
 # ---------------------------------------------------------------------------
 # Matrix definitions
@@ -117,29 +108,19 @@ jobs:
       - name: Configure toolchain
         if: steps.gate.outputs.should_run == 'true'
         run: |
-          case "${{ github.event.inputs.clang }}" in
-            neutron)
-              # Fetch latest release asset URL from GitHub API automatically
-              CLANG_URL="$(curl -fsSL \
-                https://api.github.com/repos/Neutron-Toolchains/clang-build-catalogue/releases/latest \
-                | grep -o '"browser_download_url": *"[^"]*\.tar\.zst"' \
-                | head -n1 \
-                | cut -d'"' -f4)"
-              if [[ -z "$CLANG_URL" ]]; then
-                echo "ERROR: Failed to resolve latest Neutron Clang URL" >&2
-                exit 1
-              fi
-              echo "Resolved Neutron URL: $CLANG_URL"
-              CLANG_TYPE="dir"
-              ;;
-            aosp)
-              CLANG_URL="https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r584948b-14863223/clang-r584948b.tar.gz"
-              CLANG_TYPE="dir"
-              ;;
-          esac
-
+          # Fetch latest AOSP Clang release asset URL from ip2na mirror
+          CLANG_URL="$(curl -fsSL \
+            https://api.github.com/repos/ip2na/aosp_clang_mirror/releases/latest \
+            | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' \
+            | head -n1 \
+            | cut -d'"' -f4)"
+          if [[ -z "$CLANG_URL" ]]; then
+            echo "ERROR: Failed to resolve latest AOSP Clang URL" >&2
+            exit 1
+          fi
+          echo "Resolved AOSP Clang URL: $CLANG_URL"
+          CLANG_TYPE="dir"
           CLANG_FILENAME="$(basename "$CLANG_URL" .tar.gz)"
-          CLANG_FILENAME="${CLANG_FILENAME%.tar.zst}"
 
           {
             echo "CLANG_URL=$CLANG_URL"
@@ -173,7 +154,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             git curl wget bc bison flex \
-            libssl-dev libelf-dev zip cpio zstd
+            libssl-dev libelf-dev zip cpio
 
       - name: Restore toolchain cache
         if: steps.gate.outputs.should_run == 'true'
@@ -186,17 +167,9 @@ jobs:
       - name: Download and extract Clang
         if: steps.gate.outputs.should_run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          if [[ "$CLANG_URL" == *.tar.zst ]]; then
-            mkdir -p "$CLANG_DIR"
-            wget -q -O clang.tar.zst "$CLANG_URL"
-            tar -I zstd -xf clang.tar.zst -C "$CLANG_DIR"
-            rm clang.tar.zst
-          else
-            mkdir -p "$CLANG_DIR"
-            wget -q -O clang.tar.gz "$CLANG_URL"
-            tar -xzf clang.tar.gz -C "$CLANG_DIR"
-            rm clang.tar.gz
-          fi
+          wget -q "$CLANG_URL"
+          tar -xzf "$(basename "$CLANG_URL")"
+          rm "$(basename "$CLANG_URL")"
 
       - name: Export Clang to PATH
         if: steps.gate.outputs.should_run == 'true'

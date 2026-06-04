@@ -6,7 +6,7 @@ on:
       branch:
         description: "Kernel source branch"
         required: true
-        default: main
+        default: staging
         type: choice
         options:
           - main
@@ -21,6 +21,17 @@ on:
           - all
           - susfs
           - vanilla
+
+      clang:
+        description: "Clang toolchain"
+        required: true
+        default: greenforce
+        type: choice
+        options:
+          - greenforce
+          - llvm
+          - zyc
+          - aosp
 
 # ---------------------------------------------------------------------------
 # Matrix definitions
@@ -63,6 +74,8 @@ jobs:
     # Steps
     # -------------------------------------------------------------------------
     steps:
+      # Decide whether this matrix leg should execute based on the
+      # user-selected build_type input.
       - name: Evaluate build target
         id: gate
         run: |
@@ -74,6 +87,8 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Resolve branch-specific variables once so every subsequent step can
+      # reference them cleanly from $GITHUB_ENV.
       - name: Resolve branch variables
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -105,12 +120,30 @@ jobs:
             echo "RELEASE_TAGS=$RELEASE_TAGS"
           } >> "$GITHUB_ENV"
 
+      # Map the toolchain input to its download URL and extraction strategy.
       - name: Configure toolchain
         if: steps.gate.outputs.should_run == 'true'
         run: |
-          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/42d2c090c14c9c7f4dfd365ae551e2b959dc775c/clang-r584948b.tar.gz"
-          CLANG_TYPE="dir"
-          CLANG_FILENAME="clang-r584948b"
+          case "${{ github.event.inputs.clang }}" in
+            greenforce)
+              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
+              CLANG_TYPE="dir"
+              ;;
+            llvm)
+              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.6-x86_64.tar.gz"
+              CLANG_TYPE="flat"
+              ;;
+            zyc)
+              CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250401-release/Clang-20.0.0git-20250401.tar.gz"
+              CLANG_TYPE="dir"
+              ;;
+            aosp)
+              CLANG_URL="https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r584948b-14863223/clang-r584948b.tar.gz"
+              CLANG_TYPE="dir"
+              ;;
+          esac
+
+          CLANG_FILENAME="$(basename "$CLANG_URL" .tar.gz)"
 
           {
             echo "CLANG_URL=$CLANG_URL"
@@ -123,6 +156,8 @@ jobs:
         if: steps.gate.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
+      # Compute the release tag here so it is available for both the release
+      # publish step and the Telegram notification.
       - name: Set release tag
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -157,9 +192,18 @@ jobs:
       - name: Download and extract Clang
         if: steps.gate.outputs.should_run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          wget -q "$CLANG_URL"
-          tar -xzf "$(basename "$CLANG_URL")"
-          rm "$(basename "$CLANG_URL")"
+          if [[ "$CLANG_TYPE" == "flat" ]]; then
+            # Archive already extracts into a top-level named directory.
+            wget -q "$CLANG_URL"
+            tar -xzf "$(basename "$CLANG_URL")"
+            rm "$(basename "$CLANG_URL")"
+          else
+            # Archive is a flat tarball; wrap it in its own directory.
+            mkdir -p "$CLANG_DIR"
+            wget -q -O clang.tar.gz "$CLANG_URL"
+            tar -xzf clang.tar.gz -C "$CLANG_DIR"
+            rm clang.tar.gz
+          fi
 
       - name: Export Clang to PATH
         if: steps.gate.outputs.should_run == 'true'

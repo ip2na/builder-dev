@@ -6,7 +6,7 @@ on:
       branch:
         description: "Kernel source branch"
         required: true
-        default: staging
+        default: main
         type: choice
         options:
           - main
@@ -72,8 +72,6 @@ jobs:
     # Steps
     # -------------------------------------------------------------------------
     steps:
-      # Decide whether this matrix leg should execute based on the
-      # user-selected build_type input.
       - name: Evaluate build target
         id: gate
         run: |
@@ -85,8 +83,6 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Resolve branch-specific variables once so every subsequent step can
-      # reference them cleanly from $GITHUB_ENV.
       - name: Resolve branch variables
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -118,13 +114,22 @@ jobs:
             echo "RELEASE_TAGS=$RELEASE_TAGS"
           } >> "$GITHUB_ENV"
 
-      # Map the toolchain input to its download URL and extraction strategy.
       - name: Configure toolchain
         if: steps.gate.outputs.should_run == 'true'
         run: |
           case "${{ github.event.inputs.clang }}" in
             neutron)
-              CLANG_URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/24032024/neutron-clang-24032024.tar.zst"
+              # Fetch latest release asset URL from GitHub API automatically
+              CLANG_URL="$(curl -fsSL \
+                https://api.github.com/repos/Neutron-Toolchains/clang-build-catalogue/releases/latest \
+                | grep -o '"browser_download_url": *"[^"]*\.tar\.zst"' \
+                | head -n1 \
+                | cut -d'"' -f4)"
+              if [[ -z "$CLANG_URL" ]]; then
+                echo "ERROR: Failed to resolve latest Neutron Clang URL" >&2
+                exit 1
+              fi
+              echo "Resolved Neutron URL: $CLANG_URL"
               CLANG_TYPE="dir"
               ;;
             aosp)
@@ -147,8 +152,6 @@ jobs:
         if: steps.gate.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
-      # Compute the release tag here so it is available for both the release
-      # publish step and the Telegram notification.
       - name: Set release tag
         if: steps.gate.outputs.should_run == 'true'
         run: |

@@ -6,13 +6,11 @@ on:
       branch:
         description: "Kernel source branch"
         required: true
-        default: main
+        default: staging
         type: choice
         options:
           - main
           - staging
-          - linux-stable
-          - linux-staging
 
       build_type:
         description: "Build variant"
@@ -27,12 +25,10 @@ on:
       clang:
         description: "Clang toolchain"
         required: true
-        default: greenforce
+        default: neutron
         type: choice
         options:
-          - greenforce
-          - llvm
-          - zyc
+          - neutron
           - aosp
 
 # ---------------------------------------------------------------------------
@@ -127,16 +123,8 @@ jobs:
         if: steps.gate.outputs.should_run == 'true'
         run: |
           case "${{ github.event.inputs.clang }}" in
-            greenforce)
-              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
-              CLANG_TYPE="dir"
-              ;;
-            llvm)
-              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.6-x86_64.tar.gz"
-              CLANG_TYPE="flat"
-              ;;
-            zyc)
-              CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250401-release/Clang-20.0.0git-20250401.tar.gz"
+            neutron)
+              CLANG_URL="https://github.com/Neutron-Toolchains/clang-build-catalogue/releases/download/24032024/neutron-clang-24032024.tar.zst"
               CLANG_TYPE="dir"
               ;;
             aosp)
@@ -146,6 +134,7 @@ jobs:
           esac
 
           CLANG_FILENAME="$(basename "$CLANG_URL" .tar.gz)"
+          CLANG_FILENAME="${CLANG_FILENAME%.tar.zst}"
 
           {
             echo "CLANG_URL=$CLANG_URL"
@@ -181,7 +170,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             git curl wget bc bison flex \
-            libssl-dev libelf-dev zip cpio
+            libssl-dev libelf-dev zip cpio zstd
 
       - name: Restore toolchain cache
         if: steps.gate.outputs.should_run == 'true'
@@ -194,13 +183,12 @@ jobs:
       - name: Download and extract Clang
         if: steps.gate.outputs.should_run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          if [[ "$CLANG_TYPE" == "flat" ]]; then
-            # Archive already extracts into a top-level named directory.
-            wget -q "$CLANG_URL"
-            tar -xzf "$(basename "$CLANG_URL")"
-            rm "$(basename "$CLANG_URL")"
+          if [[ "$CLANG_URL" == *.tar.zst ]]; then
+            mkdir -p "$CLANG_DIR"
+            wget -q -O clang.tar.zst "$CLANG_URL"
+            tar -I zstd -xf clang.tar.zst -C "$CLANG_DIR"
+            rm clang.tar.zst
           else
-            # Archive is a flat tarball; wrap it in its own directory.
             mkdir -p "$CLANG_DIR"
             wget -q -O clang.tar.gz "$CLANG_URL"
             tar -xzf clang.tar.gz -C "$CLANG_DIR"

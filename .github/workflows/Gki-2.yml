@@ -108,19 +108,9 @@ jobs:
       - name: Configure toolchain
         if: steps.gate.outputs.should_run == 'true'
         run: |
-          # Fetch latest AOSP Clang release asset URL from ip2na mirror
-          CLANG_URL="$(curl -fsSL \
-            https://api.github.com/repos/ip2na/aosp_clang_mirror/releases/latest \
-            | grep -o '"browser_download_url": *"[^"]*\.tar\.gz"' \
-            | head -n1 \
-            | cut -d'"' -f4)"
-          if [[ -z "$CLANG_URL" ]]; then
-            echo "ERROR: Failed to resolve latest AOSP Clang URL" >&2
-            exit 1
-          fi
-          echo "Resolved AOSP Clang URL: $CLANG_URL"
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/42d2c090c14c9c7f4dfd365ae551e2b959dc775c/clang-r584948b.tar.gz"
           CLANG_TYPE="dir"
-          CLANG_FILENAME="$(basename "$CLANG_URL" .tar.gz)"
+          CLANG_FILENAME="clang-r584948b"
 
           {
             echo "CLANG_URL=$CLANG_URL"
@@ -154,7 +144,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             git curl wget bc bison flex \
-            libssl-dev libelf-dev zip cpio lld
+            libssl-dev libelf-dev zip cpio
 
       - name: Restore toolchain cache
         if: steps.gate.outputs.should_run == 'true'

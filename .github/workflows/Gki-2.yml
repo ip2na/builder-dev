@@ -33,9 +33,6 @@ on:
           - zyc
           - aosp
 
-# ---------------------------------------------------------------------------
-# Matrix definitions
-# ---------------------------------------------------------------------------
 jobs:
   build:
     name: "Build [${{ matrix.name }}]"
@@ -69,13 +66,8 @@ jobs:
             telegram_tags_staging: "#Anyakernel #staging #vanilla #gki510"
             release_tags_main: "#Anyakernel #vanilla #gki-5.10"
             release_tags_staging: "#Anyakernel #staging #vanilla #gki-5.10"
-
-    # -------------------------------------------------------------------------
-    # Steps
-    # -------------------------------------------------------------------------
+    
     steps:
-      # Decide whether this matrix leg should execute based on the
-      # user-selected build_type input.
       - name: Evaluate build target
         id: gate
         run: |
@@ -86,9 +78,7 @@ jobs:
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
-
-      # Resolve branch-specific variables once so every subsequent step can
-      # reference them cleanly from $GITHUB_ENV.
+      
       - name: Resolve branch variables
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -119,8 +109,7 @@ jobs:
             echo "TELEGRAM_TAGS=$TELEGRAM_TAGS"
             echo "RELEASE_TAGS=$RELEASE_TAGS"
           } >> "$GITHUB_ENV"
-
-      # Map the toolchain input to its download URL and extraction strategy.
+      
       - name: Configure toolchain
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -155,9 +144,7 @@ jobs:
       - name: Checkout repository
         if: steps.gate.outputs.should_run == 'true'
         uses: actions/checkout@v4
-
-      # Compute the release tag here so it is available for both the release
-      # publish step and the Telegram notification.
+     
       - name: Set release tag
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -217,10 +204,7 @@ jobs:
             --depth=1 \
             "${{ secrets.KERNEL_SOURCE }}" \
             kernel
-
-      # -----------------------------------------------------------------------
-      # SUSFS variant — KernelSU Next integration
-      # -----------------------------------------------------------------------
+      
       - name: Integrate KernelSU Next + SUSFS
         if: steps.gate.outputs.should_run == 'true' && matrix.type == 'susfs'
         run: |
@@ -252,10 +236,7 @@ jobs:
         run: |
           curl -LSs "${{ secrets.PATCH_URL }}" -o /tmp/ksun-allmanager.patch
           patch -p1 --forward -d kernel/KernelSU-Next < /tmp/ksun-allmanager.patch
-
-      # -----------------------------------------------------------------------
-      # Defconfig overlay — appended via printf to avoid heredoc quoting issues
-      # -----------------------------------------------------------------------
+      
       - name: Apply defconfig overlay
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -266,10 +247,7 @@ jobs:
           else
             printf '%s\n' "${{ secrets.CONFIG_LINES_VANILLA }}" >> "$DEFCONFIG"
           fi
-
-      # -----------------------------------------------------------------------
-      # Compile
-      # -----------------------------------------------------------------------
+      
       - name: Compile kernel
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -289,10 +267,7 @@ jobs:
           cd kernel
           make "${MAKE_ARGS[@]}" gki_defconfig
           make "${MAKE_ARGS[@]}" -j"$(nproc --all)" Image
-
-      # -----------------------------------------------------------------------
-      # Collect build metadata for use in release notes and Telegram message
-      # -----------------------------------------------------------------------
+      
       - name: Collect build metadata
         if: steps.gate.outputs.should_run == 'true'
         run: |
@@ -303,20 +278,14 @@ jobs:
             echo "COMPILER=$("$CLANG_PATH/clang" --version | head -n1)"
             echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
           } >> "$GITHUB_ENV"
-
-      # -----------------------------------------------------------------------
-      # Package AnyKernel3 flashable ZIP
-      # -----------------------------------------------------------------------
+      
       - name: Package flashable ZIP
         if: steps.gate.outputs.should_run == 'true'
         run: |
           git clone --depth=1 -b gki-2.0 "${{ secrets.AK3_REPO }}" ak3
           cp kernel/out/arch/arm64/boot/Image ak3/
           cd ak3 && zip -r9 "$ZIP_NAME" . --exclude '*.git*' --exclude '*.github*'
-
-      # -----------------------------------------------------------------------
-      # Publish GitHub Release first so the download URL is ready for Telegram
-      # -----------------------------------------------------------------------
+      
       - name: Prune old GitHub Releases
         if: steps.gate.outputs.should_run == 'true'
         env:
@@ -382,10 +351,7 @@ jobs:
           $COMMON_BODY" \
               --latest
           fi
-
-      # -----------------------------------------------------------------------
-      # Notify Telegram with a link to the release (no direct file upload)
-      # -----------------------------------------------------------------------
+      
       - name: Send Telegram notification
         if: steps.gate.outputs.should_run == 'true'
         run: |

@@ -119,11 +119,11 @@ jobs:
               CLANG_TYPE="dir"
               ;;
             llvm)
-              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.6-x86_64.tar.gz"
+              CLANG_URL="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-22.1.7-x86_64.tar.gz"
               CLANG_TYPE="flat"
               ;;
             zyc)
-              CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250401-release/Clang-20.0.0git-20250401.tar.gz"
+              CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz"
               CLANG_TYPE="dir"
               ;;
             aosp)

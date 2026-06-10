@@ -180,12 +180,10 @@ jobs:
         if: steps.gate.outputs.should_run == 'true' && steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           if [[ "$CLANG_TYPE" == "flat" ]]; then
-            # Archive already extracts into a top-level named directory.
             wget -q "$CLANG_URL"
             tar -xzf "$(basename "$CLANG_URL")"
             rm "$(basename "$CLANG_URL")"
           else
-            # Archive is a flat tarball; wrap it in its own directory.
             mkdir -p "$CLANG_DIR"
             wget -q -O clang.tar.gz "$CLANG_URL"
             tar -xzf clang.tar.gz -C "$CLANG_DIR"
@@ -210,14 +208,12 @@ jobs:
         run: |
           cd kernel
 
-          # Set up KernelSU Next (dev-susfs variant)
           curl -LSs \
             "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" \
             | bash -s dev-susfs
 
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
-          # Clone SUSFS patches for android12 GKI 5.10
           git clone --depth=1 \
             https://gitlab.com/simonpunk/susfs4ksu \
             -b gki-android12-5.10 \
@@ -225,7 +221,6 @@ jobs:
 
           echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
-          # Apply SUSFS file overlays and kernel patch
           PATCHES="$(pwd)/.susfs/kernel_patches"
           cp -R "$PATCHES/fs/"* ./fs/
           cp -R "$PATCHES/include/"* ./include/
@@ -286,24 +281,6 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image ak3/
           cd ak3 && zip -r9 "$ZIP_NAME" . --exclude '*.git*' --exclude '*.github*'
       
-      - name: Prune old GitHub Releases
-        if: steps.gate.outputs.should_run == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          STALE=$(gh release list \
-            --repo AnyaKernel/Kernel-Release \
-            --limit 100 \
-            --json tagName,createdAt \
-            --jq 'sort_by(.createdAt) | reverse | .[25:] | .[].tagName')
-
-          for TAG in $STALE; do
-            echo "Deleting stale release: $TAG"
-            gh release delete "$TAG" \
-              --repo AnyaKernel/Kernel-Release \
-              --yes --cleanup-tag 2>/dev/null || true
-          done
-
       - name: Publish GitHub Release
         if: steps.gate.outputs.should_run == 'true'
         env:

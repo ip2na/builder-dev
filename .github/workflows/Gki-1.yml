@@ -25,6 +25,9 @@ env:
   KERNEL_REPO: https://github.com/ip2na/anya_xiaomi_sm6115.git
   AK3_REPO:    https://github.com/ip2na/Anykernel3.git
   AK3_BRANCH:  gki-1.0
+  CLANG_TAG:   r547379
+  CLANG_URL:   https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz
+  CLANG_DIR:   google-clang-r547379
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -64,38 +67,20 @@ jobs:
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             zstd
 
-      - name: Resolve toolchain
-        run: |
-          PAYLOAD=$(curl -fsSL "https://api.github.com/repos/Neutron-Toolchains/clang-build-catalogue/releases/latest")
-          NT_TAG=$(echo "$PAYLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
-          NT_URL=$(echo "$PAYLOAD" | python3 -c "
-          import sys, json
-          r = json.load(sys.stdin)
-          asset = next(a for a in r['assets'] if a['name'].endswith('.tar.zst'))
-          print(asset['browser_download_url'])
-          ")
-          NT_DIR="$(basename "$NT_URL" .tar.zst)"
-
-          {
-            echo "CLANG_TAG=$NT_TAG"
-            echo "CLANG_URL=$NT_URL"
-            echo "CLANG_DIR=$NT_DIR"
-          } >> "$GITHUB_ENV"
-
       - name: Restore toolchain cache
         id: cache-clang
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
-          key:  neutron-clang-${{ env.CLANG_TAG }}
+          key:  google-clang-${{ env.CLANG_TAG }}
 
       - name: Download and extract Clang
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$CLANG_DIR"
-          wget -q -O clang.tar.zst "$CLANG_URL"
-          tar -I zstd -xf clang.tar.zst -C "$CLANG_DIR"
-          rm clang.tar.zst
+          wget -q -O clang.tar.gz "$CLANG_URL"
+          tar -xf clang.tar.gz -C "$CLANG_DIR"
+          rm clang.tar.gz
 
       - name: Clone kernel source
         run: |

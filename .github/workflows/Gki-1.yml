@@ -26,7 +26,7 @@ env:
   AK3_REPO:    https://github.com/ip2na/Anykernel3.git
   AK3_BRANCH:  gki-1.0
   CLANG_TAG:   r547379
-  CLANG_URL:   https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz
+  CLANG_URL:   https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r547379-13174946/clang-r547379.tar.gz
   CLANG_DIR:   google-clang-r547379
 
 concurrency:

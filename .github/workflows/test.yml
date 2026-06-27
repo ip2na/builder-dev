@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    name: SM6115 · ${{ env.KERNEL_BRANCH }} · ksu-susfs
+    name: SM6115 · ksu-susfs-419 · ksu-susfs
     runs-on: ubuntu-latest
 
     steps:

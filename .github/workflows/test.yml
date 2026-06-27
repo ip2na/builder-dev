@@ -1,4 +1,4 @@
-name: Valeryn Kernel — CI
+name: Valeryn Kernel Susfs — CI
 
 on:
   workflow_dispatch:
@@ -70,7 +70,7 @@ jobs:
         working-directory: kernel
         run: |
           curl -LSs \
-            "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev-susfs/kernel/setup.sh" \
+            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" \
             | bash -s legacy
 
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" \

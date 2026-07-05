@@ -223,8 +223,8 @@ jobs:
 
           patch -p1 --forward < "$PATCHES/50_add_susfs_in_gki-android12-5.10.patch"
           patch -p1 --forward < "$PATCHES/51_enhanced_susfs-android12-5.10.patch"
+          patch -p1 --forward < "$PATCHES/70_ksu_safety-kernelsu-next-5.10.patch"
           patch -p1 --forward < "$PATCHES/60_zeromount-android12-5.10.patch"
-          patch -p1 --forward -d KernelSU-Next < "$PATCHES/70_ksu_safety-kernelsu-next-5.10.patch"
 
           rm -rf sb
 

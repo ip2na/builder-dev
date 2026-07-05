@@ -219,22 +219,12 @@ jobs:
           echo "SUSFS_COMMIT=$SB_LOG (Super-Builders)" >> "$GITHUB_ENV"
           echo "ZEROMOUNT_COMMIT=$SB_LOG (Super-Builders)" >> "$GITHUB_ENV"
 
-          PATCHES="sb/android12-5.10/KernelSU-Next/patches"
+          PATCHES="$(pwd)/sb/android12-5.10/KernelSU-Next/patches"
 
           patch -p1 --forward < "$PATCHES/50_add_susfs_in_gki-android12-5.10.patch"
           patch -p1 --forward < "$PATCHES/51_enhanced_susfs-android12-5.10.patch"
-          patch -p1 --forward < "$PATCHES/70_ksu_safety-kernelsu-next-5.10.patch"
-
-          filterdiff \
-            --exclude='*/kernel/hook/*' \
-            --exclude='*/kernel/policy/*' \
-            --exclude='*/kernel/runtime/*' \
-            --exclude='*/kernel/selinux/*' \
-            --exclude='*/kernel/supercall/*' \
-            --exclude='*/kernel/feature/*' \
-            "$PATCHES/60_zeromount-android12-5.10.patch" > /tmp/60_zeromount_filtered.patch
-
-          patch -p1 --forward < /tmp/60_zeromount_filtered.patch
+          patch -p1 --forward -d KernelSU-Next < "$PATCHES/70_ksu_safety-kernelsu-next-5.10.patch"
+          patch -p1 --forward -f -d KernelSU-Next < "$PATCHES/60_zeromount-android12-5.10.patch" || true
 
           rm -rf sb
 

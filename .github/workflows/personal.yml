@@ -208,8 +208,8 @@ jobs:
           cd kernel
 
           curl -LSs \
-            "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" \
-            | bash -s dev-susfs
+            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" \
+            | bash -s dev
 
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 

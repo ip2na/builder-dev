@@ -6,11 +6,10 @@ on:
       branch:
         description: "Kernel source branch"
         required: true
-        default: staging
+        default: main
         type: choice
         options:
           - main
-          - staging
 
       build_type:
         description: "Build variant"
@@ -45,16 +44,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: KSU+SUSFS
+          - name: KSU+SUSFS+ZeroMount
             type: susfs
-            zip_suffix: Kernel-KSU-SUSFS
+            zip_suffix: Kernel-KSU-SUSFS-ZeroMount
             release_base: AnyaKernel-GKI-5.10
             build_host: anyaprjkt
-            telegram_label: "KSU Next + SUSFS"
-            telegram_tags_main: "#Anyakernel #update #gki510 #ksu #susfs"
-            telegram_tags_staging: "#Anyakernel #staging #gki510 #ksu #susfs"
-            release_tags_main: "#Anyakernel #gki-5.10 #ksu #susfs"
-            release_tags_staging: "#Anyakernel #staging #gki-5.10 #ksu #susfs"
+            telegram_label: "KSU Next + SUSFS + ZeroMount"
+            telegram_tags_main: "#Anyakernel #update #gki510 #ksu #susfs #zeromount"
+            telegram_tags_staging: "#Anyakernel #staging #gki510 #ksu #susfs #zeromount"
+            release_tags_main: "#Anyakernel #gki-5.10 #ksu #susfs #zeromount"
+            release_tags_staging: "#Anyakernel #staging #gki-5.10 #ksu #susfs #zeromount"
 
           - name: Vanilla
             type: vanilla
@@ -214,30 +213,20 @@ jobs:
 
           echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
-          git clone --depth=1 \
-            https://gitlab.com/simonpunk/susfs4ksu \
-            -b gki-android12-5.10 \
-            .susfs
+          git clone --depth=1 https://github.com/Enginex0/Super-Builders sb
 
-          echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
+          SB_LOG="$(git -C sb log -1 --pretty=format:'%s (%an)' -- android12-5.10/KernelSU-Next/patches)"
+          echo "SUSFS_COMMIT=$SB_LOG (Super-Builders)" >> "$GITHUB_ENV"
+          echo "ZEROMOUNT_COMMIT=$SB_LOG (Super-Builders)" >> "$GITHUB_ENV"
 
-          PATCHES="$(pwd)/.susfs/kernel_patches"
-          cp -R "$PATCHES/fs/"* ./fs/
-          cp -R "$PATCHES/include/"* ./include/
+          PATCHES="sb/android12-5.10/KernelSU-Next/patches"
 
-          SB_BASE="https://raw.githubusercontent.com/Enginex0/Super-Builders/main/android12-5.10/KernelSU-Next/patches"
+          patch -p1 --forward < "$PATCHES/50_add_susfs_in_gki-android12-5.10.patch"
+          patch -p1 --forward < "$PATCHES/51_enhanced_susfs-android12-5.10.patch"
+          patch -p1 --forward < "$PATCHES/60_zeromount-android12-5.10.patch"
+          patch -p1 --forward -d KernelSU-Next < "$PATCHES/70_ksu_safety-kernelsu-next-5.10.patch"
 
-          curl -LSs -o /tmp/50_susfs.patch      "$SB_BASE/50_add_susfs_in_gki-android12-5.10.patch"
-          curl -LSs -o /tmp/51_susfs_enh.patch  "$SB_BASE/51_enhanced_susfs-android12-5.10.patch"
-          curl -LSs -o /tmp/60_zeromount.patch  "$SB_BASE/60_zeromount-android12-5.10.patch"
-          curl -LSs -o /tmp/70_ksu_safety.patch "$SB_BASE/70_ksu_safety-kernelsu-next-5.10.patch"
-
-          patch -p1 --forward < /tmp/50_susfs.patch
-          patch -p1 --forward < /tmp/51_susfs_enh.patch
-          patch -p1 --forward < /tmp/60_zeromount.patch
-          patch -p1 --forward -d KernelSU-Next < /tmp/70_ksu_safety.patch
-
-          echo "ZEROMOUNT_PATCHED=true" >> "$GITHUB_ENV"
+          rm -rf sb
 
       - name: Apply all-managers patch
         if: steps.gate.outputs.should_run == 'true' && matrix.type == 'susfs'
@@ -302,7 +291,7 @@ jobs:
           EXTRA_NOTES=""
           if [[ "${{ matrix.type }}" == "susfs" ]]; then
             EXTRA_NOTES="**🔐 KSU commit:** $KSU_COMMIT
-          **🛡️ SUSFS commit:** $SUSFS_COMMIT"
+          **🛡️ SUSFS/ZeroMount commit:** $SUSFS_COMMIT"
           fi
 
           COMMON_BODY="**🌿 Branch:** \`$GIT_BRANCH\`
@@ -351,7 +340,7 @@ jobs:
           if [[ "${{ matrix.type }}" == "susfs" ]]; then
             EXTRA_INFO="
           🔐 <b>KSU commit:</b> $KSU_COMMIT
-          🛡️ <b>SUSFS commit:</b> $SUSFS_COMMIT"
+          🛡️ <b>SUSFS/ZeroMount commit:</b> $SUSFS_COMMIT"
           fi
 
           STAGING_HEADER=""

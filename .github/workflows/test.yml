@@ -1,4 +1,4 @@
-name: Anya Kernel — Matrix CI
+name: Anya Kernel nomoun — Matrix CI
 
 on:
   workflow_dispatch:

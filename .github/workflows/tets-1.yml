@@ -14,7 +14,7 @@ on:
       variant:
         description: Build variant
         required: true
-        default: both
+        default: vanilla
         type: choice
         options:
           - both

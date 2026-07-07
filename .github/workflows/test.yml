@@ -231,7 +231,7 @@ jobs:
         run: |
           cd kernel
 
-          git clone --depth=1 https://github.com/maxsteeel/nomount.git .nomount
+          git clone -b dev --depth=1 https://github.com/maxsteeel/nomount.git .nomount
 
           echo "NOMOUNT_COMMIT=$(git -C .nomount log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 

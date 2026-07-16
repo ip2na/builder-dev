@@ -11,6 +11,7 @@ on:
         options:
           - staging
           - main
+          - susfs
       variant:
         description: Build variant
         required: true

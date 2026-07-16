@@ -90,15 +90,15 @@ jobs:
             "$KERNEL_REPO" \
             kernel
 
-      - name: Integrate KernelSU Next (hookless)
+      - name: Integrate XXKSU
         if: matrix.variant == 'ksu'
         working-directory: kernel
         run: |
           curl -LSs \
-            "https://raw.githubusercontent.com/Sorayukii/KernelSU-Next/stable/kernel/setup.sh" \
-            | bash -s hookless-staging
+            "https://raw.githubusercontent.com/backslashxx/KernelSU/master/kernel/setup.sh" \
+            | bash -
 
-          echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" \
+          echo "KSU_COMMIT=$(git -C KernelSU log -1 --pretty=format:'%s (%an)')" \
             >> "$GITHUB_ENV"
 
       - name: Set KSU metadata placeholder
@@ -196,7 +196,7 @@ jobs:
           variant = os.environ["VARIANT"]
 
           if variant == "ksu":
-              variant_line = "🔐 <b>Variant:</b> KernelSU Next (Hookless)"
+              variant_line = "🔐 <b>Variant:</b> XXKSU"
               ksu_line     = f"🔑 <b>KSU commit:</b> {os.environ['KSU_COMMIT']}"
               hashtags     = "#chime #pocom3 #redmi9t #ksu"
           else:

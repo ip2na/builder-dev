@@ -115,7 +115,7 @@ jobs:
         run: |
           case "${{ github.event.inputs.clang }}" in
             greenforce)
-              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
+              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260716/gf-clang-24.0.0-20260716.tar.gz"
               CLANG_TYPE="dir"
               ;;
             llvm)

@@ -570,7 +570,6 @@ jobs:
           make "${MAKE_ARGS[@]}" gki_defconfig
           make "${MAKE_ARGS[@]}" -j"$(nproc --all)" Image
 
-
       - name: Collect build metadata
         if: steps.gate.outputs.should_run == 'true'
         run: |

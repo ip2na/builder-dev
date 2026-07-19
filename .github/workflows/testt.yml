@@ -271,7 +271,7 @@ jobs:
         run: |
           echo "CONFIG_NOMOUNT=y" >> kernel/arch/arm64/configs/gki_defconfig
 
-            - name: Compile kernel
+      - name: Compile kernel
         if: steps.gate.outputs.should_run == 'true'
         run: |
           export TZ="Asia/Jakarta"

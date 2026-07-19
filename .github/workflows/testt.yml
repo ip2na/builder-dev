@@ -278,19 +278,19 @@ jobs:
           export PATH="$CLANG_PATH:$PATH"
           export KBUILD_BUILD_USER="builder-dev"
           export KBUILD_BUILD_HOST="${{ matrix.build_host }}"
-
-          # Membuat wrapper untuk mengalihkan perintah 32-bit ke GCC
+          
           mkdir -p bin_override
           cat <<EOF > bin_override/clang
           #!/bin/bash
-          if [[ "\$*" == *"--target=arm-linux-gnueabi"* ]]; then
-            $ARM32_GCC_PATH"gcc" "\${@//--target=arm-linux-gnueabi/}"
+          if [[ "\$*" =~ "-target" && ( "\$*" =~ "arm" || "\$*" =~ "thumb" ) ]]; then
+            $ARM32_GCC_PATH"gcc" \${@//--target=*/ }
           else
-            clang "\$@"
+            $(which clang) "\$@"
           fi
           EOF
           chmod +x bin_override/clang
-          export PATH="$(pwd)/bin_override:$PATH"
+          export PATH="$(pwd)/bin_override:\$PATH"
+
 
           MAKE_ARGS=(
             ARCH=arm64

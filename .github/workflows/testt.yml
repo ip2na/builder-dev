@@ -279,15 +279,23 @@ jobs:
           export KBUILD_BUILD_USER="builder-dev"
           export KBUILD_BUILD_HOST="${{ matrix.build_host }}"
 
-          MAKE_ARGS=(
+            MAKE_ARGS=(
             ARCH=arm64
-            LLVM=1
-            LLVM_IAS=1
             O=out
             CROSS_COMPILE=aarch64-linux-gnu-
-            CROSS_COMPILE_ARM32="$ARM32_GCC_PATH"
-            COMPATCC="${ARM32_GCC_PATH}gcc"
-            COMPATLD="${ARM32_GCC_PATH}ld"
+            CROSS_COMPILE_COMPAT="$ARM32_GCC_PATH"
+            CC=clang
+            LD=ld.lld
+            AR=llvm-ar
+            NM=llvm-nm
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            STRIP=llvm-strip
+            READELF=llvm-readelf
+            HOSTCC=clang
+            HOSTCXX=clang++
+            HOSTLD=ld.lld
+            HOSTAR=llvm-ar
           )
 
           cd kernel

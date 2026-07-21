@@ -1,4 +1,4 @@
-name: Anya Kernel nomoun teest
+name: Anya Kernel nomoun
 
 on:
   workflow_dispatch:
@@ -268,7 +268,6 @@ jobs:
         run: |
           cd kernel
           sed -i '/ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE/,/endif/c\ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE\nKBUILD_CFLAGS += -Os\nelse\nKBUILD_CFLAGS += -O2\nKBUILD_CFLAGS += -march=armv8.2-a+lse -fno-trapping-math -fno-math-errno\nendif' Makefile
-          sed -i '/ifdef CONFIG_LTO_CLANG_THIN/,/endif/c\ifdef CONFIG_LTO_CLANG_THIN\nCC_FLAGS_LTO\t:= -flto=thin -fsplit-lto-unit\nKBUILD_LDFLAGS\t+= --thinlto-cache-dir=$(extmod-prefix).thinlto-cache -mllvm -O2\nelse\nCC_FLAGS_LTO\t:= -flto\nKBUILD_LDFLAGS\t+= --lto-O2\nendif' Makefile
 
       - name: Compile kernel
         if: steps.gate.outputs.should_run == 'true'

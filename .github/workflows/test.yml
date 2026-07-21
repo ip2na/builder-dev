@@ -127,7 +127,7 @@ jobs:
               CLANG_TYPE="dir"
               ;;
             aosp)
-              CLANG_URL="https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r584948b-14863223/clang-r584948b.tar.gz"
+              CLANG_URL="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r547379-13174946/clang-r547379.tar.gz"
               CLANG_TYPE="dir"
               ;;
           esac

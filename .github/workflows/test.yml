@@ -56,16 +56,16 @@ jobs:
             release_tags_main: "#Anyakernel #gki-5.10 #ksu #susfs #nomount"
             release_tags_staging: "#Anyakernel #staging #gki-5.10 #ksu #susfs #nomount"
 
-          - name: Vanilla
+          - name: Vanilla+NoMount
             type: vanilla
-            zip_suffix: Kernel-Vanilla
+            zip_suffix: Kernel-Vanilla-NoMount
             release_base: AnyaKernel-Vanilla-5.10
             build_host: anyaprjkt
-            telegram_label: "Vanilla (No KSU/SUSFS)"
-            telegram_tags_main: "#Anyakernel #vanilla #gki510"
-            telegram_tags_staging: "#Anyakernel #staging #vanilla #gki510"
-            release_tags_main: "#Anyakernel #vanilla #gki-5.10"
-            release_tags_staging: "#Anyakernel #staging #vanilla #gki-5.10"
+            telegram_label: "Vanilla + NoMount (No KSU/SUSFS)"
+            telegram_tags_main: "#Anyakernel #vanilla #gki510 #nomount"
+            telegram_tags_staging: "#Anyakernel #staging #vanilla #gki510 #nomount"
+            release_tags_main: "#Anyakernel #vanilla #gki-5.10 #nomount"
+            release_tags_staging: "#Anyakernel #staging #vanilla #gki-5.10 #nomount"
 
     steps:
       - name: Evaluate build target
@@ -227,11 +227,19 @@ jobs:
           patch -p1 < "$PATCHES"/*.patch
 
       - name: Integrate NoMount
-        if: steps.gate.outputs.should_run == 'true' && matrix.type == 'susfs'
+        if: steps.gate.outputs.should_run == 'true'
         run: |
           cd kernel
 
-          git clone --depth=1 https://github.com/maxsteeel/nomount.git .nomount
+          if [[ "${{ matrix.type }}" == "vanilla" ]]; then
+            NOMOUNT_BRANCH="dev"
+          else
+            NOMOUNT_BRANCH="master"
+          fi
+
+          echo "NOMOUNT_BRANCH=$NOMOUNT_BRANCH" >> "$GITHUB_ENV"
+
+          git clone --depth=1 -b "$NOMOUNT_BRANCH" https://github.com/maxsteeel/nomount.git .nomount
 
           echo "NOMOUNT_COMMIT=$(git -C .nomount log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
@@ -259,7 +267,7 @@ jobs:
           fi
 
       - name: Inject NoMount config
-        if: steps.gate.outputs.should_run == 'true' && matrix.type == 'susfs'
+        if: steps.gate.outputs.should_run == 'true'
         run: |
           echo "CONFIG_NOMOUNT=y" >> kernel/arch/arm64/configs/gki_defconfig
 
@@ -306,11 +314,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          EXTRA_NOTES=""
+          EXTRA_NOTES="**👻 NoMount branch:** \`$NOMOUNT_BRANCH\`
+          **👻 NoMount commit:** $NOMOUNT_COMMIT"
+
           if [[ "${{ matrix.type }}" == "susfs" ]]; then
             EXTRA_NOTES="**🔐 KSU commit:** $KSU_COMMIT
           **🛡️ SUSFS commit:** $SUSFS_COMMIT
-          **👻 NoMount commit:** $NOMOUNT_COMMIT"
+          $EXTRA_NOTES"
           fi
 
           COMMON_BODY="**🌿 Branch:** \`$GIT_BRANCH\`
@@ -355,12 +365,14 @@ jobs:
         run: |
           RELEASE_URL="https://github.com/AnyaKernel/Kernel-Release/releases/tag/$RELEASE_TAG"
 
-          EXTRA_INFO=""
+          EXTRA_INFO="
+          👻 <b>NoMount branch:</b> <code>$NOMOUNT_BRANCH</code>
+          👻 <b>NoMount commit:</b> $NOMOUNT_COMMIT"
+
           if [[ "${{ matrix.type }}" == "susfs" ]]; then
             EXTRA_INFO="
           🔐 <b>KSU commit:</b> $KSU_COMMIT
-          🛡️ <b>SUSFS commit:</b> $SUSFS_COMMIT
-          👻 <b>NoMount commit:</b> $NOMOUNT_COMMIT"
+          🛡️ <b>SUSFS commit:</b> $SUSFS_COMMIT${EXTRA_INFO}"
           fi
 
           STAGING_HEADER=""

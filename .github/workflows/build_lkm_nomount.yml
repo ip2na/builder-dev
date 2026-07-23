@@ -1,0 +1,230 @@
+name: build lkm
+
+on:
+  workflow_dispatch:
+    inputs:
+      kmi_android12_5_10:
+        description: android12-5.10
+        default: true
+        type: boolean
+      kmi_android13_5_10:
+        description: android13-5.10
+        default: true
+        type: boolean
+      kmi_android13_5_15:
+        description: android13-5.15
+        default: true
+        type: boolean
+      kmi_android14_5_15:
+        description: android14-5.15
+        default: true
+        type: boolean
+      kmi_android14_6_1:
+        description: android14-6.1
+        default: true
+        type: boolean
+      kmi_android15_6_6:
+        description: android15-6.6
+        default: true
+        type: boolean
+      kmi_android16_6_12:
+        description: android16-6.12
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  select-kmis:
+    name: Select KMI builds
+    runs-on: ubuntu-24.04
+    outputs:
+      kmi: ${{ steps.matrix.outputs.kmi }}
+
+    steps:
+      - name: Generate build matrix
+        id: matrix
+        env:
+          KMI_ANDROID12_5_10: ${{ inputs.kmi_android12_5_10 }}
+          KMI_ANDROID13_5_10: ${{ inputs.kmi_android13_5_10 }}
+          KMI_ANDROID13_5_15: ${{ inputs.kmi_android13_5_15 }}
+          KMI_ANDROID14_5_15: ${{ inputs.kmi_android14_5_15 }}
+          KMI_ANDROID14_6_1: ${{ inputs.kmi_android14_6_1 }}
+          KMI_ANDROID15_6_6: ${{ inputs.kmi_android15_6_6 }}
+          KMI_ANDROID16_6_12: ${{ inputs.kmi_android16_6_12 }}
+        run: |
+          set -euo pipefail
+
+          matrix="$(jq -cn '[
+            {kmi: "android12-5.10", enabled: env.KMI_ANDROID12_5_10},
+            {kmi: "android13-5.10", enabled: env.KMI_ANDROID13_5_10},
+            {kmi: "android13-5.15", enabled: env.KMI_ANDROID13_5_15},
+            {kmi: "android14-5.15", enabled: env.KMI_ANDROID14_5_15},
+            {kmi: "android14-6.1", enabled: env.KMI_ANDROID14_6_1},
+            {kmi: "android15-6.6", enabled: env.KMI_ANDROID15_6_6},
+            {kmi: "android16-6.12", enabled: env.KMI_ANDROID16_6_12}
+          ] | map(select(.enabled == "true").kmi)')"
+
+          if [[ "$matrix" == "[]" ]]; then
+            echo "Select at least one KMI to build" >&2
+            exit 1
+          fi
+
+          echo "kmi=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.kmi }}
+    needs: select-kmis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        kmi: ${{ fromJSON(needs.select-kmis.outputs.kmi) }}
+
+    container:
+      image: ghcr.io/ylarod/ddk:${{ matrix.kmi }}-20251104
+
+    env:
+      MODULE_DIR: ${{ github.workspace }}/build/nomount
+      ARTIFACT: artifacts/nomount-${{ matrix.kmi }}-arm64.ko
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Validate DDK environment
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${KDIR:-}" || ! -f "$KDIR/Makefile" ]]; then
+            echo "KDIR is not available in the DDK container: ${KDIR:-<empty>}" >&2
+            exit 1
+          fi
+
+          if ! command -v llvm-strip >/dev/null; then
+            echo "llvm-strip is not available in the DDK container" >&2
+            exit 1
+          fi
+
+          echo "KMI: ${{ matrix.kmi }}"
+          echo "KDIR: $KDIR"
+          clang --version
+
+      - name: Prepare module
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$MODULE_DIR"
+          cp kernel/src/nomount.{c,h} "$MODULE_DIR/"
+
+          if ! grep -Fq 'MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);' "$MODULE_DIR/nomount.c"; then
+            printf '\n%s\n' 'MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);' >> "$MODULE_DIR/nomount.c"
+          fi
+
+          printf '%s\n' 'obj-m += nomount.o' > "$MODULE_DIR/Makefile"
+
+      - name: Build module
+        run: |
+          set -euo pipefail
+
+          make \
+            -j"$(nproc)" \
+            -C "$KDIR" \
+            ARCH=arm64 \
+            CC=clang \
+            M="$MODULE_DIR" \
+            modules
+
+      - name: Collect module
+        run: |
+          set -euo pipefail
+
+          install -Dm644 "$MODULE_DIR/nomount.ko" "$ARTIFACT"
+          llvm-strip -d "$ARTIFACT"
+          ls -lh "$ARTIFACT"
+
+      - name: Upload module
+        uses: actions/upload-artifact@v7
+        with:
+          name: nomount-${{ matrix.kmi }}-arm64
+          path: ${{ env.ARTIFACT }}
+
+  release:
+    name: Publish release
+    needs: [select-kmis, build]
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download all modules
+        uses: actions/download-artifact@v6
+        with:
+          path: release
+          pattern: nomount-*-arm64
+          merge-multiple: true
+
+      - name: Prepare release metadata
+        id: meta
+        run: |
+          set -euo pipefail
+
+          BUILD_DATE="$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
+          RELEASE_TAG="nomount-lkm-${{ github.run_number }}"
+
+          KMI_LIST="$(echo '${{ needs.select-kmis.outputs.kmi }}' | jq -r '.[]' | sed 's/^/- /' | paste -sd '\n')"
+          KMI_LIST_TELEGRAM="$(echo '${{ needs.select-kmis.outputs.kmi }}' | jq -r '.[]' | sed 's/^/• /' | paste -sd '\n')"
+
+          {
+            echo "BUILD_DATE=$BUILD_DATE"
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "kmi_list<<EOF"
+            echo "$KMI_LIST"
+            echo "EOF"
+            echo "kmi_list_telegram<<EOF"
+            echo "$KMI_LIST_TELEGRAM"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          gh release create "${{ steps.meta.outputs.RELEASE_TAG }}" \
+            --repo AnyaKernel/Kernel-Release \
+            release/*.ko \
+            --title "NoMount LKM | ${{ steps.meta.outputs.BUILD_DATE }}" \
+            --notes "## 👻 NoMount LKM Build
+
+          **📆 Build date:** \`${{ steps.meta.outputs.BUILD_DATE }}\`
+          **📦 KMI built:**
+          ${{ steps.meta.outputs.kmi_list }}
+
+          ---
+          #Anyakernel #nomount #lkm" \
+            --latest
+
+      - name: Send Telegram notification
+        run: |
+          set -euo pipefail
+
+          RELEASE_URL="https://github.com/AnyaKernel/Kernel-Release/releases/tag/${{ steps.meta.outputs.RELEASE_TAG }}"
+
+          MESSAGE="<b>NoMount LKM Build</b>
+          📆 <b>Build date:</b> <code>${{ steps.meta.outputs.BUILD_DATE }}</code>
+          📦 <b>KMI built:</b>
+          ${{ steps.meta.outputs.kmi_list_telegram }}
+
+          #Anyakernel #nomount #lkm
+
+          📥 <b>Download:</b> <a href=\"$RELEASE_URL\">GitHub Release</a>"
+
+          curl --fail --silent --show-error \
+            -X POST "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=${{ secrets.CHAT_ID }}" \
+            -d "parse_mode=HTML" \
+            -d "disable_web_page_preview=true" \
+            --data-urlencode "text=$MESSAGE"

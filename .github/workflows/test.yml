@@ -177,10 +177,14 @@ jobs:
       - name: Set release tag
         if: steps.gate.outputs.should_run == 'true'
         run: |
+          # FIX: pakai github.run_id (selalu unik & tidak pernah reset,
+          # bahkan kalau file workflow di-rename) supaya tag release
+          # tidak pernah tabrakan dengan release lama -> tidak numpuk
+          # lewat fallback "gh release upload --clobber" di step publish.
           if [[ "$IS_STAGING" == "true" ]]; then
-            echo "RELEASE_TAG=${RELEASE_PREFIX}-${{ github.run_number }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG=${RELEASE_PREFIX}-${{ github.run_id }}" >> "$GITHUB_ENV"
           else
-            echo "RELEASE_TAG=${RELEASE_PREFIX}-${{ github.run_number }}" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG=${RELEASE_PREFIX}-${{ github.run_number }}-${{ github.run_id }}" >> "$GITHUB_ENV"
           fi
 
       - name: Reclaim disk space
@@ -363,6 +367,11 @@ jobs:
           ---
           $RELEASE_TAGS"
 
+          # NOTE: tag sekarang selalu unik (pakai run_id), jadi
+          # "gh release create" seharusnya SELALU berhasil di jalur normal.
+          # Fallback "gh release upload --clobber" tetap dipertahankan
+          # hanya sebagai jaring pengaman kalau ada retry di run_id yang sama,
+          # bukan lagi sumber numpuk tak sengaja ke release lama.
           if [[ "$IS_STAGING" == "true" ]]; then
             gh release create "$RELEASE_TAG" \
               --repo AnyaKernel/Kernel-Release \

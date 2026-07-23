@@ -95,6 +95,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v6
 
+      - name: Clone NoMount source
+        run: |
+          set -euo pipefail
+
+          git clone --depth=1 -b master https://github.com/maxsteeel/nomount.git .nomount-src
+
       - name: Validate DDK environment
         run: |
           set -euo pipefail
@@ -118,7 +124,7 @@ jobs:
           set -euo pipefail
 
           mkdir -p "$MODULE_DIR"
-          cp kernel/src/nomount.{c,h} "$MODULE_DIR/"
+          cp .nomount-src/kernel/src/nomount.{c,h} "$MODULE_DIR/"
 
           if ! grep -Fq 'MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);' "$MODULE_DIR/nomount.c"; then
             printf '\n%s\n' 'MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);' >> "$MODULE_DIR/nomount.c"

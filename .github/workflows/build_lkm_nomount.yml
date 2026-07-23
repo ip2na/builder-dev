@@ -126,6 +126,14 @@ jobs:
           mkdir -p "$MODULE_DIR"
           cp .nomount-src/kernel/src/nomount.{c,h} "$MODULE_DIR/"
 
+          if ! grep -Fq '#include <linux/module.h>' "$MODULE_DIR/nomount.c"; then
+            sed -i '1i #include <linux/module.h>' "$MODULE_DIR/nomount.c"
+          fi
+
+          if ! grep -Fq 'MODULE_LICENSE(' "$MODULE_DIR/nomount.c"; then
+            printf '\n%s\n' 'MODULE_LICENSE("GPL");' >> "$MODULE_DIR/nomount.c"
+          fi
+
           if ! grep -Fq 'MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);' "$MODULE_DIR/nomount.c"; then
             printf '\n%s\n' 'MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);' >> "$MODULE_DIR/nomount.c"
           fi

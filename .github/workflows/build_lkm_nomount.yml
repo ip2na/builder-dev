@@ -99,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          git clone --depth=1 -b master https://github.com/maxsteeel/nomount.git .nomount-src
+          git clone --depth=1 -b dev https://github.com/maxsteeel/nomount.git .nomount-src
 
       - name: Validate DDK environment
         run: |

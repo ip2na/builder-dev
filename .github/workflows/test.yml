@@ -235,7 +235,7 @@ jobs:
 
           git clone --depth=1 \
             https://gitlab.com/simonpunk/susfs4ksu \
-            -b gki-android12-5.10 \
+            -b gki-android12-5.10-dev \
             .susfs
 
           echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"

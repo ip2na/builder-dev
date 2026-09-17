@@ -134,7 +134,7 @@ jobs:
         run: |
           case "${{ github.event.inputs.clang }}" in
             greenforce)
-              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260716/gf-clang-24.0.0-20260716.tar.gz"
+              CLANG_URL="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
               CLANG_TYPE="dir"
               ;;
             llvm)
@@ -146,7 +146,7 @@ jobs:
               CLANG_TYPE="dir"
               ;;
             aosp)
-              CLANG_URL="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16165221/clang-r614150.tar.gz"
+              CLANG_URL="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16311247/clang-r614150.tar.gz"
               CLANG_TYPE="dir"
               ;;
           esac

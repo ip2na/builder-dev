@@ -143,7 +143,7 @@ jobs:
               ;;
             xclang)
               CLANG_URL="https://github.com/Xtra-Manager-Software/XClang-Binaries/releases/download/xclangpolly-thinlto-22.1.2/XClang-22.1.2-Polly.tar.gz"
-              CLANG_TYPE="dir"
+              CLANG_TYPE="flat"
               ;;
             aosp)
               CLANG_URL="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16311247/clang-r614150.tar.gz"

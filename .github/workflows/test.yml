@@ -185,7 +185,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             git curl wget bc bison flex \
-            libssl-dev libelf-dev zip cpio
+            libssl-dev libelf-dev zip cpio libxml2
+
+          if [[ "${{ github.event.inputs.clang }}" == "xclang" ]]; then
+            LIBDIR="/usr/lib/x86_64-linux-gnu"
+            sudo ln -sf "$LIBDIR/libxml2.so.2" "$LIBDIR/libxml2.so.16"
+            sudo ldconfig
+          fi
 
       - name: Restore toolchain cache
         if: steps.gate.outputs.should_run == 'true'

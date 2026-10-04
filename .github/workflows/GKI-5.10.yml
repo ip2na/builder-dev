@@ -1,4 +1,4 @@
-name: Anya Kernel nomoun
+name: Anya Kernel release GKI-5.10
 
 on:
   workflow_dispatch:

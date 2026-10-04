@@ -6,7 +6,7 @@ on:
       branch:
         description: "Kernel source branch"
         required: true
-        default: master
+        default: main
         type: choice
         options:
           - main
@@ -15,7 +15,7 @@ on:
       build_type:
         description: "Build variant"
         required: true
-        default: susfs_nomount
+        default: all
         type: choice
         options:
           - all
@@ -26,7 +26,7 @@ on:
       clang:
         description: "Clang toolchain"
         required: true
-        default: greenforce
+        default: xclang
         type: choice
         options:
           - greenforce

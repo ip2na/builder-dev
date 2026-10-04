@@ -146,7 +146,7 @@ jobs:
               CLANG_TYPE="dir"
               ;;
             aosp)
-              CLANG_URL="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16311247/clang-r614150.tar.gz"
+              CLANG_URL="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16464736/clang-r614150.tar.gz"
               CLANG_TYPE="dir"
               ;;
           esac

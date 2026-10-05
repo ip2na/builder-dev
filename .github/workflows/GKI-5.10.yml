@@ -272,12 +272,6 @@ jobs:
 
           rm -rf .nomount
 
-      - name: Apply all-managers patch
-        if: steps.gate.outputs.should_run == 'true' && matrix.has_susfs == true
-        run: |
-          curl -fLSs "${{ secrets.PATCH_URL }}" -o /tmp/ksun-allmanager.patch
-          patch -p1 --forward -d kernel/KernelSU-Next < /tmp/ksun-allmanager.patch
-
       - name: Apply defconfig overlay
         if: steps.gate.outputs.should_run == 'true'
         run: |

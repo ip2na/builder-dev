@@ -1,0 +1,265 @@
+name: build lkm
+
+on:
+  workflow_call:
+    inputs:
+      build_all:
+        description: Build all KMIs
+        type: boolean
+        default: false
+      upstream_ref:
+        description: Upstream branch, tag or SHA
+        type: string
+        default: master
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch, tag or SHA
+        type: string
+        default: master
+      kmi_android12_5_10:
+        description: android12-5.10
+        type: boolean
+        default: false
+      kmi_android13_5_10:
+        description: android13-5.10
+        type: boolean
+        default: false
+      kmi_android13_5_15:
+        description: android13-5.15
+        type: boolean
+        default: false
+      kmi_android14_5_15:
+        description: android14-5.15
+        type: boolean
+        default: false
+      kmi_android14_6_1:
+        description: android14-6.1
+        type: boolean
+        default: false
+      kmi_android15_6_6:
+        description: android15-6.6
+        type: boolean
+        default: false
+      kmi_android16_6_12:
+        description: android16-6.12
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-lkm-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: maxsteeel/nomount
+  UPSTREAM_REF: ${{ inputs.upstream_ref || 'master' }}
+
+jobs:
+  matrix:
+    name: Resolve matrix
+    runs-on: ubuntu-latest
+    outputs:
+      kmi: ${{ steps.resolve.outputs.kmi }}
+    steps:
+      - id: resolve
+        env:
+          BUILD_ALL: ${{ inputs.build_all }}
+          K_A12_510: ${{ inputs.kmi_android12_5_10 }}
+          K_A13_510: ${{ inputs.kmi_android13_5_10 }}
+          K_A13_515: ${{ inputs.kmi_android13_5_15 }}
+          K_A14_515: ${{ inputs.kmi_android14_5_15 }}
+          K_A14_61: ${{ inputs.kmi_android14_6_1 }}
+          K_A15_66: ${{ inputs.kmi_android15_6_6 }}
+          K_A16_612: ${{ inputs.kmi_android16_6_12 }}
+        run: |
+          set -euo pipefail
+
+          all=(android12-5.10 android13-5.10 android13-5.15 android14-5.15
+               android14-6.1 android15-6.6 android16-6.12)
+          declare -A want=(
+            [android12-5.10]="$K_A12_510"
+            [android13-5.10]="$K_A13_510"
+            [android13-5.15]="$K_A13_515"
+            [android14-5.15]="$K_A14_515"
+            [android14-6.1]="$K_A14_61"
+            [android15-6.6]="$K_A15_66"
+            [android16-6.12]="$K_A16_612"
+          )
+
+          sel=()
+          for k in "${all[@]}"; do
+            if [[ "$BUILD_ALL" == true || "${want[$k]}" == true ]]; then
+              sel+=("$k")
+            fi
+          done
+          (( ${#sel[@]} )) || sel=("${all[@]}")
+
+          echo "kmi=$(printf '%s\n' "${sel[@]}" | jq -Rnc '[inputs]')" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.kmi }}
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        kmi: ${{ fromJSON(needs.matrix.outputs.kmi) }}
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}
+    env:
+      SRC_DIR: ${{ github.workspace }}/kernel/src
+      OUT: artifacts/nomount-${{ matrix.kmi }}.ko
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.UPSTREAM_REF }}
+          fetch-depth: 0
+
+      - name: Check toolchain
+        run: |
+          set -euo pipefail
+          [[ -f "${KDIR:-}/Makefile" ]] || { echo "KDIR missing: ${KDIR:-<unset>}" >&2; exit 1; }
+          command -v llvm-strip >/dev/null || { echo "llvm-strip missing" >&2; exit 1; }
+          echo "kmi=${{ matrix.kmi }} kdir=$KDIR"
+          clang --version | head -n1
+          ld.lld --version
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory '*'
+          CONFIG_NOMOUNT=m make -j"$(nproc)" -C "$KDIR" \
+            ARCH=arm64 LLVM=1 LLVM_IAS=1 M="$SRC_DIR" modules
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          install -Dm644 "$SRC_DIR/nomount.ko" "$OUT"
+          llvm-strip --strip-unneeded -R .BTF "$OUT"
+          ls -lh "$OUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nomount-${{ matrix.kmi }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Release
+    needs: build
+    if: ${{ !cancelled() && contains(fromJSON('["success","failure"]'), needs.build.result) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.CHAT_ID }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Gather metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          files=(out/*.ko)
+          (( ${#files[@]} )) || { echo "no modules built" >&2; exit 1; }
+          (cd out && sha256sum -- *.ko > SHA256SUMS)
+
+          commit="$(gh api "repos/$UPSTREAM_REPO/commits/$UPSTREAM_REF")"
+          sha="$(jq -r .sha <<<"$commit")"
+          short="${sha:0:7}"
+          subject="$(jq -r '.commit.message | split("\n")[0]' <<<"$commit")"
+          subject_html="$(sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<<"$subject")"
+
+          kmis="$(for f in "${files[@]}"; do b="${f##*/}"; b="${b#nomount-}"; echo "${b%.ko}"; done)"
+          kmi_list="$(sed 's/^/- /' <<<"$kmis")"
+          kmi_inline="$(tr '\n' ',' <<<"$kmis" | sed 's/,$//; s/,/, /g')"
+
+          tag="nomount-$(date -u +%Y%m%d-%H%M)-$short"
+          when="$(TZ=Asia/Jakarta date '+%Y-%m-%d %H:%M WIB')"
+
+          cat > notes.md <<EOF
+          Upstream: [$UPSTREAM_REPO@$short](https://github.com/$UPSTREAM_REPO/commit/$sha)
+
+          > $subject
+
+          Built for:
+
+          $kmi_list
+
+          Built on $when. Checksums in SHA256SUMS.
+          EOF
+
+          cat > caption.html <<EOF
+          <b>NoMount LKM</b>
+          <a href="https://github.com/$UPSTREAM_REPO/commit/$sha">$UPSTREAM_REPO@$short</a>
+          <i>$subject_html</i>
+
+          KMI: $kmi_inline
+          Build: $when
+          <a href="https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag">Release page</a>
+          EOF
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          SHORT: ${{ steps.meta.outputs.short }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" out/*.ko out/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "NoMount LKM $SHORT" \
+            --notes-file notes.md
+
+      - name: Telegram
+        if: ${{ env.BOT_TOKEN != '' && env.CHAT_ID != '' }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          api="https://api.telegram.org/bot${BOT_TOKEN}"
+          files=(out/*.ko)
+          caption="$(<caption.html)"
+
+          if (( ${#files[@]} == 1 )); then
+            resp="$(curl -sS "$api/sendDocument" \
+              -F chat_id="$CHAT_ID" \
+              -F document=@"${files[0]}" \
+              -F parse_mode=HTML \
+              -F caption="$caption")"
+          else
+            args=()
+            for i in "${!files[@]}"; do
+              args+=(-F "f$i=@${files[$i]}")
+            done
+            media="$(jq -nc --arg cap "$caption" --argjson n "${#files[@]}" '
+              [range($n) | {type: "document", media: "attach://f\(.)"}]
+              | .[-1] += {caption: $cap, parse_mode: "HTML"}')"
+            resp="$(curl -sS "$api/sendMediaGroup" \
+              -F chat_id="$CHAT_ID" \
+              -F media="$media" \
+              "${args[@]}")"
+          fi
+
+          jq -e '.ok' <<<"$resp" >/dev/null || {
+            echo "telegram: $(jq -r '.description // "unknown error"' <<<"$resp")" >&2
+            exit 1
+          }

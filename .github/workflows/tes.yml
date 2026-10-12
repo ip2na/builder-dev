@@ -1,4 +1,4 @@
-name: Anya Kernel release GKI-5.10
+name: Anya Kernel Next + Baka
 
 on:
   workflow_dispatch:

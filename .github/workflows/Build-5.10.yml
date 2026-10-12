@@ -1,4 +1,4 @@
-name: Anya Kernel release GKI-5.10 TS
+name: Build GKI-5.10 
 
 on:
   workflow_dispatch:

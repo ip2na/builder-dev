@@ -1,0 +1,404 @@
+name: Anya Kernel release GKI-5.10 TS
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Kernel source branch"
+        required: true
+        default: main
+        type: choice
+        options:
+          - main
+          - staging
+
+      build_type:
+        description: "Build variant"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - susfs
+          - susfs_nomount
+          - vanilla
+
+      clang:
+        description: "Clang toolchain"
+        required: true
+        default: xclang
+        type: choice
+        options:
+          - greenforce
+          - llvm
+          - xclang
+          - aosp
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_REPO: AnyaKernel/Kernel-Release
+
+jobs:
+  prepare:
+    name: Prepare matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Select variants
+        id: matrix
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: |
+          cat > variants.json <<'EOF'
+          [
+            {"name": "KSU+SUSFS", "type": "susfs", "has_susfs": true, "nomount": false,
+             "zip": "Kernel-KSU-SUSFS", "release": "AnyaKernel-GKI-5.10",
+             "label": "KSU Next + SUSFS", "tags": "#ksu #susfs"},
+            {"name": "KSU+SUSFS+NoMount", "type": "susfs_nomount", "has_susfs": true, "nomount": true,
+             "zip": "Kernel-KSU-SUSFS-NoMount", "release": "AnyaKernel-GKI-5.10-NoMount",
+             "label": "KSU Next + SUSFS + NoMount", "tags": "#ksu #susfs #nomount"},
+            {"name": "Vanilla", "type": "vanilla", "has_susfs": false, "nomount": false,
+             "zip": "Kernel-Vanilla", "release": "AnyaKernel-Vanilla-5.10",
+             "label": "Vanilla (No KSU/SUSFS)", "tags": "#vanilla"}
+          ]
+          EOF
+
+          matrix="$(jq -c --arg t "$BUILD_TYPE" \
+            'map(select($t == "all" or .type == $t))' variants.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build [${{ matrix.name }}]
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+
+    env:
+      BRANCH: ${{ inputs.branch }}
+      CLANG_CHOICE: ${{ inputs.clang }}
+      HAS_SUSFS: ${{ matrix.has_susfs }}
+      NOMOUNT: ${{ matrix.nomount }}
+      ZIP_BASE: ${{ matrix.zip }}
+      RELEASE_BASE: ${{ matrix.release }}
+      VARIANT_LABEL: ${{ matrix.label }}
+      VARIANT_TAGS: ${{ matrix.tags }}
+
+    steps:
+      - name: Resolve variables
+        run: |
+          if [[ "$BRANCH" == "staging" ]]; then
+            IS_STAGING=true
+            ZIP_NAME="${ZIP_BASE}-Staging.zip"
+            RELEASE_TAG="${RELEASE_BASE}-Staging-${GITHUB_RUN_ID}"
+            TG_VERSION="${VARIANT_LABEL} [STAGING]"
+            TG_TAGS="#Anyakernel #staging #gki510 ${VARIANT_TAGS}"
+            RELEASE_TAGS="#Anyakernel #staging #gki-5.10 ${VARIANT_TAGS}"
+          else
+            IS_STAGING=false
+            ZIP_NAME="${ZIP_BASE}.zip"
+            RELEASE_TAG="${RELEASE_BASE}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ID}"
+            TG_VERSION="${VARIANT_LABEL}"
+            TG_TAGS="#Anyakernel #update #gki510 ${VARIANT_TAGS}"
+            RELEASE_TAGS="#Anyakernel #gki-5.10 ${VARIANT_TAGS}"
+          fi
+
+          {
+            echo "IS_STAGING=$IS_STAGING"
+            echo "ZIP_NAME=$ZIP_NAME"
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "TG_VERSION=$TG_VERSION"
+            echo "TG_TAGS=$TG_TAGS"
+            echo "RELEASE_TAGS=$RELEASE_TAGS"
+          } >> "$GITHUB_ENV"
+
+      - name: Select toolchain
+        run: |
+          case "$CLANG_CHOICE" in
+            greenforce)
+              url="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
+              type="dir"
+              ;;
+            llvm)
+              url="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.1-x86_64.tar.gz"
+              type="flat"
+              ;;
+            xclang)
+              url="https://github.com/Xtra-Manager-Software/XClang-Binaries/releases/download/xclangpolly-thinlto-22.1.2/XClang-22.1.2-Polly.tar.gz"
+              type="dir"
+              ;;
+            aosp)
+              url="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16464736/clang-r614150.tar.gz"
+              type="dir"
+              ;;
+            *)
+              echo "Unknown clang toolchain: $CLANG_CHOICE" >&2
+              exit 1
+              ;;
+          esac
+
+          name="$(basename "$url" .tar.gz)"
+
+          {
+            echo "CLANG_URL=$url"
+            echo "CLANG_TYPE=$type"
+            echo "CLANG_DIR=$name"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc
+          sudo apt-get clean
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            git curl wget bc bison flex \
+            libssl-dev libelf-dev zip cpio libxml2
+
+          # XClang is linked against libxml2.so.16, runner only ships .so.2
+          if [[ "$CLANG_CHOICE" == "xclang" ]]; then
+            libdir="/usr/lib/x86_64-linux-gnu"
+            sudo ln -sf "$libdir/libxml2.so.2" "$libdir/libxml2.so.16"
+            sudo ldconfig
+          fi
+
+      - name: Restore clang cache
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/${{ env.CLANG_DIR }}
+          key: ${{ env.CLANG_DIR }}
+
+      - name: Fetch clang
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fL -o clang.tar.gz "$CLANG_URL"
+          if [[ "$CLANG_TYPE" == "flat" ]]; then
+            tar -xzf clang.tar.gz
+          else
+            mkdir -p "$CLANG_DIR"
+            tar -xzf clang.tar.gz -C "$CLANG_DIR"
+          fi
+          rm -f clang.tar.gz
+
+      - name: Export clang path
+        run: |
+          bin="$(find "$PWD/$CLANG_DIR" \( -type f -o -type l \) -name clang -path '*/bin/*' -print -quit)"
+          if [[ -z "$bin" ]]; then
+            echo "clang binary not found in $CLANG_DIR" >&2
+            exit 1
+          fi
+          echo "CLANG_PATH=$(dirname "$bin")" >> "$GITHUB_ENV"
+
+      - name: Clone kernel
+        env:
+          KERNEL_SOURCE: ${{ secrets.KERNEL_SOURCE }}
+        run: git clone --branch "$BRANCH" --depth=1 "$KERNEL_SOURCE" kernel
+
+      - name: Add KernelSU Next + SUSFS
+        if: matrix.has_susfs
+        run: |
+          cd kernel
+
+          curl -fLSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" \
+            | bash -s dev-susfs
+          echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
+
+          git clone --depth=1 -b gki-android12-5.10-dev https://gitlab.com/simonpunk/susfs4ksu .susfs
+          echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
+
+          patches="$PWD/.susfs/kernel_patches"
+          cp -R "$patches"/fs/* ./fs/
+          cp -R "$patches"/include/* ./include/
+          for p in "$patches"/*.patch; do
+            patch -p1 --forward < "$p"
+          done
+
+      - name: Add NoMount
+        if: matrix.nomount
+        run: |
+          cd kernel
+
+          git clone --depth=1 -b dev https://github.com/maxsteeel/nomount.git .nomount
+          echo "NOMOUNT_COMMIT=$(git -C .nomount log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
+
+          mkdir -p fs/nomount
+          cp -f .nomount/kernel/src/* fs/nomount/
+          echo 'source "fs/nomount/Kconfig"' >> fs/Kconfig
+          echo 'obj-$(CONFIG_NOMOUNT) += nomount/' >> fs/Makefile
+
+          rm -rf .nomount
+
+      - name: Apply defconfig
+        env:
+          LINES_SUSFS: ${{ secrets.CONFIG_LINES_SUSFS }}
+          LINES_VANILLA: ${{ secrets.CONFIG_LINES_VANILLA }}
+        run: |
+          defconfig="kernel/arch/arm64/configs/gki_defconfig"
+
+          if [[ "$HAS_SUSFS" == "true" ]]; then
+            printf '%s\n' "$LINES_SUSFS" >> "$defconfig"
+          else
+            printf '%s\n' "$LINES_VANILLA" >> "$defconfig"
+          fi
+
+          if [[ "$NOMOUNT" == "true" ]]; then
+            echo "CONFIG_NOMOUNT=y" >> "$defconfig"
+          fi
+
+      - name: Build
+        run: |
+          export TZ="Asia/Jakarta"
+          export PATH="$CLANG_PATH:$PATH"
+          export KBUILD_BUILD_USER="builder-dev"
+          export KBUILD_BUILD_HOST="anyaprjkt"
+
+          args=(
+            ARCH=arm64
+            LLVM=1
+            LLVM_IAS=1
+            O=out
+            CROSS_COMPILE=aarch64-linux-gnu-
+          )
+
+          cd kernel
+          make "${args[@]}" gki_defconfig
+          make "${args[@]}" -j"$(nproc --all)" Image
+
+      - name: Collect build info
+        run: |
+          {
+            echo "GIT_BRANCH=$(git -C kernel rev-parse --abbrev-ref HEAD)"
+            echo "GIT_COMMIT=$(git -C kernel log -1 --pretty=format:'%s (%an)')"
+            echo "KERNEL_VER=$(sed -n 's/.*"\(.*\)".*/\1/p' kernel/out/include/generated/utsrelease.h)"
+            echo "COMPILER=$("$CLANG_PATH/clang" --version | sed -n 1p)"
+            echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
+          } >> "$GITHUB_ENV"
+
+      - name: Package zip
+        env:
+          AK3_REPO: ${{ secrets.AK3_REPO }}
+        run: |
+          git clone --depth=1 -b gki-2.0 "$AK3_REPO" ak3
+          cp kernel/out/arch/arm64/boot/Image ak3/
+          cd ak3
+          zip -r9 "$ZIP_NAME" . --exclude '*.git*' --exclude '*.github*'
+
+      - name: Upload build config on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-${{ matrix.type }}
+          path: kernel/out/.config
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          {
+            if [[ "$IS_STAGING" == "true" ]]; then
+              echo "## Staging build: Anya Kernel | $TG_VERSION"
+              echo
+              echo "> Built from the staging branch. Not intended for daily use."
+              echo
+            else
+              echo "## Anya Kernel | $TG_VERSION"
+              echo
+            fi
+
+            echo "**Branch:** \`$GIT_BRANCH\`"
+            echo "**Linux version:** \`$KERNEL_VER\`"
+            echo "**Build date:** \`$BUILD_DATE\`"
+            echo "**Variant:** $TG_VERSION"
+            echo "**Latest commit:** $GIT_COMMIT"
+            if [[ "$HAS_SUSFS" == "true" ]]; then
+              echo "**KSU commit:** $KSU_COMMIT"
+              echo "**SUSFS commit:** $SUSFS_COMMIT"
+            fi
+            if [[ "$NOMOUNT" == "true" ]]; then
+              echo "**NoMount commit:** $NOMOUNT_COMMIT"
+            fi
+            echo "**Compiler:** $COMPILER"
+            echo
+            echo "---"
+            echo "$RELEASE_TAGS"
+          } > notes.md
+
+          if [[ "$IS_STAGING" == "true" ]]; then
+            title="[STAGING] Anya Kernel | $VARIANT_LABEL | GKI 5.10 | $BUILD_DATE"
+            flag="--prerelease"
+          else
+            title="Anya Kernel | $VARIANT_LABEL | GKI 5.10 | $BUILD_DATE"
+            flag="--latest"
+          fi
+
+          if gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "ak3/$ZIP_NAME" \
+              --repo "$RELEASE_REPO" --clobber
+          else
+            gh release create "$RELEASE_TAG" "ak3/$ZIP_NAME" \
+              --repo "$RELEASE_REPO" \
+              --title "$title" \
+              --notes-file notes.md \
+              "$flag"
+          fi
+
+      - name: Notify Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          # parse_mode=HTML rejects raw <, > and &
+          esc() {
+            printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+          }
+
+          url="https://github.com/${RELEASE_REPO}/releases/tag/${RELEASE_TAG}"
+
+          msg="$(
+            if [[ "$IS_STAGING" == "true" ]]; then
+              printf '⚠️ <b>[STAGING BUILD]</b>\n\n'
+            fi
+
+            printf '<b>Anya Kernel — %s</b>\n' "$(esc "$TG_VERSION")"
+            printf '🌱 <b>Branch:</b> <code>%s</code>\n' "$(esc "$GIT_BRANCH")"
+            printf '🐧 <b>Linux version:</b> <code>%s</code>\n' "$(esc "$KERNEL_VER")"
+            printf '📆 <b>Build date:</b> <code>%s</code>\n' "$BUILD_DATE"
+            printf '🦎 <b>Variant:</b> %s\n' "$(esc "$TG_VERSION")"
+            printf '♻️ <b>Latest commit:</b> %s\n' "$(esc "$GIT_COMMIT")"
+            if [[ "$HAS_SUSFS" == "true" ]]; then
+              printf '🔐 <b>KSU commit:</b> %s\n' "$(esc "$KSU_COMMIT")"
+              printf '🛡️ <b>SUSFS commit:</b> %s\n' "$(esc "$SUSFS_COMMIT")"
+            fi
+            if [[ "$NOMOUNT" == "true" ]]; then
+              printf '👻 <b>NoMount commit:</b> %s\n' "$(esc "$NOMOUNT_COMMIT")"
+            fi
+            printf '⚙️ <b>Compiler:</b> %s\n\n' "$(esc "$COMPILER")"
+            printf '%s\n\n' "$TG_TAGS"
+            printf '📥 <b>Download:</b> <a href="%s">GitHub Release</a>' "$url"
+          )"
+
+          curl --fail --silent --show-error \
+            -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            -d "disable_web_page_preview=true" \
+            --data-urlencode "text=${msg}"

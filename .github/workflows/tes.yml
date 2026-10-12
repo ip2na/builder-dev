@@ -1,4 +1,4 @@
-name: Anya Kernel Next + Baka
+name: Anya Kernel release GKI-5.10 TS
 
 on:
   workflow_dispatch:
@@ -21,8 +21,6 @@ on:
           - all
           - susfs
           - susfs_nomount
-          - bakasu_susfs
-          - bakasu_susfs_nomount
           - vanilla
 
       clang:
@@ -60,19 +58,13 @@ jobs:
         run: |
           cat > variants.json <<'EOF'
           [
-            {"name": "KSU Next+SUSFS", "type": "susfs", "ksu": "next", "has_susfs": true, "nomount": false,
+            {"name": "KSU+SUSFS", "type": "susfs", "has_susfs": true, "nomount": false,
              "zip": "Kernel-KSU-SUSFS", "release": "AnyaKernel-GKI-5.10",
              "label": "KSU Next + SUSFS", "tags": "#ksu #susfs"},
-            {"name": "KSU Next+SUSFS+NoMount", "type": "susfs_nomount", "ksu": "next", "has_susfs": true, "nomount": true,
+            {"name": "KSU+SUSFS+NoMount", "type": "susfs_nomount", "has_susfs": true, "nomount": true,
              "zip": "Kernel-KSU-SUSFS-NoMount", "release": "AnyaKernel-GKI-5.10-NoMount",
              "label": "KSU Next + SUSFS + NoMount", "tags": "#ksu #susfs #nomount"},
-            {"name": "BakaSU+SUSFS", "type": "bakasu_susfs", "ksu": "baka", "has_susfs": true, "nomount": false,
-             "zip": "Kernel-BakaSU-SUSFS", "release": "AnyaKernel-BakaSU-GKI-5.10",
-             "label": "BakaSU + SUSFS", "tags": "#bakasu #susfs"},
-            {"name": "BakaSU+SUSFS+NoMount", "type": "bakasu_susfs_nomount", "ksu": "baka", "has_susfs": true, "nomount": true,
-             "zip": "Kernel-BakaSU-SUSFS-NoMount", "release": "AnyaKernel-BakaSU-GKI-5.10-NoMount",
-             "label": "BakaSU + SUSFS + NoMount", "tags": "#bakasu #susfs #nomount"},
-            {"name": "Vanilla", "type": "vanilla", "ksu": "none", "has_susfs": false, "nomount": false,
+            {"name": "Vanilla", "type": "vanilla", "has_susfs": false, "nomount": false,
              "zip": "Kernel-Vanilla", "release": "AnyaKernel-Vanilla-5.10",
              "label": "Vanilla (No KSU/SUSFS)", "tags": "#vanilla"}
           ]
@@ -96,7 +88,6 @@ jobs:
     env:
       BRANCH: ${{ inputs.branch }}
       CLANG_CHOICE: ${{ inputs.clang }}
-      KSU: ${{ matrix.ksu }}
       HAS_SUSFS: ${{ matrix.has_susfs }}
       NOMOUNT: ${{ matrix.nomount }}
       ZIP_BASE: ${{ matrix.zip }}
@@ -220,24 +211,14 @@ jobs:
           KERNEL_SOURCE: ${{ secrets.KERNEL_SOURCE }}
         run: git clone --branch "$BRANCH" --depth=1 "$KERNEL_SOURCE" kernel
 
-      - name: Add KernelSU Next
-        if: matrix.ksu == 'next'
-        run: |
-          cd kernel
-          curl -fLSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" \
-            | bash -s dev-susfs
-          echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
-
-      - name: Add BakaSU
-        if: matrix.ksu == 'baka'
-        run: |
-          cd kernel
-          curl -fLSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
-
-      - name: Add SUSFS
+      - name: Add KernelSU Next + SUSFS
         if: matrix.has_susfs
         run: |
           cd kernel
+
+          curl -fLSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" \
+            | bash -s dev-susfs
+          echo "KSU_COMMIT=$(git -C KernelSU-Next log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
 
           git clone --depth=1 -b gki-android12-5.10-dev https://gitlab.com/simonpunk/susfs4ksu .susfs
           echo "SUSFS_COMMIT=$(git -C .susfs log -1 --pretty=format:'%s (%an)')" >> "$GITHUB_ENV"
@@ -271,10 +252,11 @@ jobs:
         run: |
           defconfig="kernel/arch/arm64/configs/gki_defconfig"
 
-          case "$KSU" in
-            next|baka) printf '%s\n' "$LINES_SUSFS" >> "$defconfig" ;;
-            *)         printf '%s\n' "$LINES_VANILLA" >> "$defconfig" ;;
-          esac
+          if [[ "$HAS_SUSFS" == "true" ]]; then
+            printf '%s\n' "$LINES_SUSFS" >> "$defconfig"
+          else
+            printf '%s\n' "$LINES_VANILLA" >> "$defconfig"
+          fi
 
           if [[ "$NOMOUNT" == "true" ]]; then
             echo "CONFIG_NOMOUNT=y" >> "$defconfig"
@@ -347,10 +329,8 @@ jobs:
             echo "**Build date:** \`$BUILD_DATE\`"
             echo "**Variant:** $TG_VERSION"
             echo "**Latest commit:** $GIT_COMMIT"
-            if [[ -n "${KSU_COMMIT:-}" ]]; then
-              echo "**KSU commit:** $KSU_COMMIT"
-            fi
             if [[ "$HAS_SUSFS" == "true" ]]; then
+              echo "**KSU commit:** $KSU_COMMIT"
               echo "**SUSFS commit:** $SUSFS_COMMIT"
             fi
             if [[ "$NOMOUNT" == "true" ]]; then
@@ -404,10 +384,8 @@ jobs:
             printf '📆 <b>Build date:</b> <code>%s</code>\n' "$BUILD_DATE"
             printf '🦎 <b>Variant:</b> %s\n' "$(esc "$TG_VERSION")"
             printf '♻️ <b>Latest commit:</b> %s\n' "$(esc "$GIT_COMMIT")"
-            if [[ -n "${KSU_COMMIT:-}" ]]; then
-              printf '🔐 <b>KSU commit:</b> %s\n' "$(esc "$KSU_COMMIT")"
-            fi
             if [[ "$HAS_SUSFS" == "true" ]]; then
+              printf '🔐 <b>KSU commit:</b> %s\n' "$(esc "$KSU_COMMIT")"
               printf '🛡️ <b>SUSFS commit:</b> %s\n' "$(esc "$SUSFS_COMMIT")"
             fi
             if [[ "$NOMOUNT" == "true" ]]; then

@@ -1,4 +1,4 @@
-name: build lkm
+name: build nomoun lkm
 
 on:
   workflow_call:
@@ -50,12 +50,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-lkm-${{ github.ref }}
+  group: build-lkm-nomount
   cancel-in-progress: false
 
 env:
   UPSTREAM_REPO: maxsteeel/nomount
   UPSTREAM_REF: ${{ inputs.upstream_ref || 'master' }}
+  RELEASE_REPO: AnyaKernel/Kernel-Release
+  KEEP_RELEASES: 25
 
 jobs:
   matrix:
@@ -141,12 +143,15 @@ jobs:
           set -euo pipefail
           install -Dm644 "$SRC_DIR/nomount.ko" "$OUT"
           llvm-strip --strip-unneeded -R .BTF "$OUT"
+          clang --version | head -n1 > "${OUT%.ko}.clang"
           ls -lh "$OUT"
 
       - uses: actions/upload-artifact@v7
         with:
           name: nomount-${{ matrix.kmi }}
-          path: ${{ env.OUT }}
+          path: |
+            ${{ env.OUT }}
+            artifacts/nomount-${{ matrix.kmi }}.clang
           if-no-files-found: error
           retention-days: 7
 
@@ -156,8 +161,6 @@ jobs:
     if: ${{ !cancelled() && contains(fromJSON('["success","failure"]'), needs.build.result) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: write
     env:
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -167,7 +170,7 @@ jobs:
           path: out
           merge-multiple: true
 
-      - name: Gather metadata
+      - name: Gather metadata and license files
         id: meta
         env:
           GH_TOKEN: ${{ github.token }}
@@ -182,52 +185,143 @@ jobs:
           commit="$(gh api "repos/$UPSTREAM_REPO/commits/$UPSTREAM_REF")"
           sha="$(jq -r .sha <<<"$commit")"
           short="${sha:0:7}"
-          subject="$(jq -r '.commit.message | split("\n")[0]' <<<"$commit")"
-          subject_html="$(sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<<"$subject")"
+          subject="$(jq -r '.commit.message | split("\n")[0]' <<<"$commit" | cut -c1-120)"
+          author="$(jq -r '.commit.author.name' <<<"$commit")"
+
+          compiler="unknown"
+          clang_files=(out/*.clang)
+          if (( ${#clang_files[@]} )); then
+            compiler="$(head -qn1 "${clang_files[@]}" | sort -u | head -n1)"
+          fi
+
+          gh api "repos/$UPSTREAM_REPO/tarball/$sha" > "nomount-src-$short.tar.gz"
+          gh api "repos/$UPSTREAM_REPO/contents/LICENSE" \
+            -H "Accept: application/vnd.github.raw" > LICENSE
+          grep -q "GNU GENERAL PUBLIC LICENSE" LICENSE || {
+            echo "upstream LICENSE is not GPL, aborting" >&2; exit 1; }
+
+          wf="${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY"/}"
+          wf="${wf%%@*}"
+          script_url="https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/$wf"
 
           kmis="$(for f in "${files[@]}"; do b="${f##*/}"; b="${b#nomount-}"; echo "${b%.ko}"; done)"
-          kmi_list="$(sed 's/^/- /' <<<"$kmis")"
-          kmi_inline="$(tr '\n' ',' <<<"$kmis" | sed 's/,$//; s/,/, /g')"
+          kmi_inline="$(paste -sd, <<<"$kmis" | sed 's/,/, /g')"
 
-          tag="nomount-$(date -u +%Y%m%d-%H%M)-$short"
-          when="$(TZ=Asia/Jakarta date '+%Y-%m-%d %H:%M WIB')"
+          tag="AnyaKernel-NoMount-LKM-${GITHUB_RUN_ID}"
+          if (( GITHUB_RUN_ATTEMPT > 1 )); then tag+="-r${GITHUB_RUN_ATTEMPT}"; fi
 
-          cat > notes.md <<EOF
-          Upstream: [$UPSTREAM_REPO@$short](https://github.com/$UPSTREAM_REPO/commit/$sha)
+          when="$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
 
-          > $subject
+          if [[ "$UPSTREAM_REF" == master ]]; then
+            prefix=""; pre=false; hashtag=""
+          else
+            prefix="[DEV] "; pre=true; hashtag=" #dev"
+          fi
+          title="${prefix}NoMount LKM | $short | $when"
+          release_url="https://github.com/$RELEASE_REPO/releases/tag/$tag"
 
-          Built for:
+          cat > NOTICE.txt <<EOF
+          NoMount LKM (unofficial build)
 
-          $kmi_list
+          Upstream project : $UPSTREAM_REPO
+          Upstream URL     : https://github.com/$UPSTREAM_REPO
+          Upstream commit  : $sha
+          License          : GNU General Public License v3.0 (see LICENSE)
 
-          Built on $when. Checksums in SHA256SUMS.
+          These binaries are built from the unmodified upstream source at the
+          commit above. Copyright remains with the upstream authors; their notices
+          are preserved in the attached source archive.
+
+          Corresponding source : nomount-src-$short.tar.gz (attached to this release)
+          Build script         : $script_url
+
+          Build command:
+            CONFIG_NOMOUNT=m make -C \$KDIR ARCH=arm64 LLVM=1 LLVM_IAS=1 M=kernel/src modules
+          Post-processing:
+            llvm-strip --strip-unneeded -R .BTF
+
+          This program is distributed in the hope that it will be useful, but
+          WITHOUT ANY WARRANTY; see the GPL-3.0 text in LICENSE for details.
           EOF
 
-          cat > caption.html <<EOF
-          <b>NoMount LKM</b>
-          <a href="https://github.com/$UPSTREAM_REPO/commit/$sha">$UPSTREAM_REPO@$short</a>
-          <i>$subject_html</i>
+          {
+            echo "## ${prefix}NoMount LKM build from upstream"
+            echo "> Built from [$UPSTREAM_REPO](https://github.com/$UPSTREAM_REPO). Unofficial build, unmodified source."
+            echo
+            printf '%s  \n' \
+              "**Branch:** \`$UPSTREAM_REF\`" \
+              "**Build date:** \`$when\`" \
+              "**KMI:** $kmi_inline" \
+              "**Latest commit:** [\`$short\`](https://github.com/$UPSTREAM_REPO/commit/$sha) $subject ($author)" \
+              "**Compiler:** $compiler" \
+              "**License:** GPL-3.0 (see \`LICENSE\`)" \
+              "**Source:** \`nomount-src-$short.tar.gz\` attached, or [upstream](https://github.com/$UPSTREAM_REPO/tree/$sha)" \
+              "**Build script:** [$wf]($script_url)"
+            echo
+            echo "---"
+            echo
+            echo "#Anyakernel #nomount #lkm #gki$hashtag"
+          } > notes.md
 
-          KMI: $kmi_inline
-          Build: $when
-          <a href="https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag">Release page</a>
-          EOF
+          esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+          {
+            echo "<b>${prefix}NoMount LKM</b>"
+            echo
+            echo "<b>Upstream:</b> <a href=\"https://github.com/$UPSTREAM_REPO/commit/$sha\">$UPSTREAM_REPO@$short</a>"
+            echo "<b>Branch:</b> <code>$UPSTREAM_REF</code>"
+            echo "<b>KMI:</b> $kmi_inline"
+            echo "<b>Build date:</b> <code>$when</code>"
+            echo "<b>Latest commit:</b> $(esc <<<"$subject ($author)")"
+            echo "<b>Compiler:</b> $(esc <<<"$compiler")"
+            echo
+            echo "License: GPL-3.0. Source and license: <a href=\"$release_url\">release page</a>"
+            echo
+            echo "#Anyakernel #nomount #lkm$hashtag"
+          } > caption.html
 
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "short=$short" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$tag"
+            echo "short=$short"
+            echo "title=$title"
+            echo "pre=$pre"
+          } >> "$GITHUB_OUTPUT"
 
       - name: GitHub release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG: ${{ steps.meta.outputs.tag }}
+          TITLE: ${{ steps.meta.outputs.title }}
+          PRE: ${{ steps.meta.outputs.pre }}
           SHORT: ${{ steps.meta.outputs.short }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" out/*.ko out/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "NoMount LKM $SHORT" \
-            --notes-file notes.md
+          assets=(out/*.ko out/SHA256SUMS "nomount-src-$SHORT.tar.gz" LICENSE NOTICE.txt)
+
+          flags=()
+          if [[ "$PRE" == true ]]; then flags+=(--prerelease); fi
+
+          if gh release view "$TAG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --clobber --repo "$RELEASE_REPO"
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --repo "$RELEASE_REPO" \
+              --title "$TITLE" \
+              --notes-file notes.md \
+              "${flags[@]}"
+          fi
+
+      - name: Prune old releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "$RELEASE_REPO" --limit 200 \
+            --json tagName,createdAt \
+            --jq "[.[] | select(.tagName | startswith(\"AnyaKernel-NoMount-LKM-\"))]
+                  | sort_by(.createdAt) | reverse | .[$KEEP_RELEASES:] | .[].tagName" |
+          while read -r t; do
+            gh release delete "$t" --repo "$RELEASE_REPO" --cleanup-tag --yes
+          done
 
       - name: Telegram
         if: ${{ env.BOT_TOKEN != '' && env.CHAT_ID != '' }}

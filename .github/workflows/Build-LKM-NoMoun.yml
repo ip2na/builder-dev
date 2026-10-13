@@ -1,4 +1,4 @@
-name: build nomoun lkm
+name: Build NoMount LKM
 
 on:
   workflow_call:
@@ -57,6 +57,7 @@ env:
   UPSTREAM_REPO: maxsteeel/nomount
   UPSTREAM_REF: ${{ inputs.upstream_ref || 'master' }}
   RELEASE_REPO: AnyaKernel/Kernel-Release
+  TAG_PREFIX: AnyaKernel-NoMount-LKM-
   KEEP_RELEASES: 25
 
 jobs:
@@ -162,6 +163,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
       CHAT_ID: ${{ secrets.CHAT_ID }}
     steps:
@@ -170,10 +172,10 @@ jobs:
           path: out
           merge-multiple: true
 
-      - name: Gather metadata and license files
+      - name: Prepare release
         id: meta
         env:
-          GH_TOKEN: ${{ github.token }}
+          BUILD_RESULT: ${{ needs.build.result }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -207,18 +209,21 @@ jobs:
           kmis="$(for f in "${files[@]}"; do b="${f##*/}"; b="${b#nomount-}"; echo "${b%.ko}"; done)"
           kmi_inline="$(paste -sd, <<<"$kmis" | sed 's/,/, /g')"
 
-          tag="AnyaKernel-NoMount-LKM-${GITHUB_RUN_ID}"
+          tag="${TAG_PREFIX}${GITHUB_RUN_ID}"
           if (( GITHUB_RUN_ATTEMPT > 1 )); then tag+="-r${GITHUB_RUN_ATTEMPT}"; fi
+          release_url="https://github.com/$RELEASE_REPO/releases/tag/$tag"
 
           when="$(TZ=Asia/Jakarta date '+%d/%m/%Y %H:%M WIB')"
 
           if [[ "$UPSTREAM_REF" == master ]]; then
-            prefix=""; pre=false; hashtag=""
+            prefix=""; pre=false
           else
-            prefix="[DEV] "; pre=true; hashtag=" #dev"
+            prefix="[DEV] "; pre=true
           fi
           title="${prefix}NoMount LKM | $short | $when"
-          release_url="https://github.com/$RELEASE_REPO/releases/tag/$tag"
+
+          partial=false
+          [[ "$BUILD_RESULT" == success ]] || partial=true
 
           cat > NOTICE.txt <<EOF
           NoMount LKM (unofficial build)
@@ -245,22 +250,22 @@ jobs:
           EOF
 
           {
-            echo "## ${prefix}NoMount LKM build from upstream"
-            echo "> Built from [$UPSTREAM_REPO](https://github.com/$UPSTREAM_REPO). Unofficial build, unmodified source."
+            echo "## ${prefix}NoMount LKM"
+            echo "Built from [$UPSTREAM_REPO](https://github.com/$UPSTREAM_REPO). Unofficial build, unmodified source."
+            if [[ "$partial" == true ]]; then
+              echo
+              echo "> **Note:** some KMIs failed to build and are not included in this release."
+            fi
             echo
             printf '%s  \n' \
               "**Branch:** \`$UPSTREAM_REF\`" \
               "**Build date:** \`$when\`" \
               "**KMI:** $kmi_inline" \
-              "**Latest commit:** [\`$short\`](https://github.com/$UPSTREAM_REPO/commit/$sha) $subject ($author)" \
+              "**Commit:** [\`$short\`](https://github.com/$UPSTREAM_REPO/commit/$sha) $subject ($author)" \
               "**Compiler:** $compiler" \
               "**License:** GPL-3.0 (see \`LICENSE\`)" \
               "**Source:** \`nomount-src-$short.tar.gz\` attached, or [upstream](https://github.com/$UPSTREAM_REPO/tree/$sha)" \
               "**Build script:** [$wf]($script_url)"
-            echo
-            echo "---"
-            echo
-            echo "#Anyakernel #nomount #lkm #gki$hashtag"
           } > notes.md
 
           esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
@@ -271,24 +276,26 @@ jobs:
             echo "<b>Branch:</b> <code>$UPSTREAM_REF</code>"
             echo "<b>KMI:</b> $kmi_inline"
             echo "<b>Build date:</b> <code>$when</code>"
-            echo "<b>Latest commit:</b> $(esc <<<"$subject ($author)")"
+            echo "<b>Commit:</b> $(esc <<<"$subject ($author)")"
             echo "<b>Compiler:</b> $(esc <<<"$compiler")"
+            if [[ "$partial" == true ]]; then
+              echo
+              echo "<i>Note: some KMIs failed to build.</i>"
+            fi
             echo
-            echo "License: GPL-3.0. Source and license: <a href=\"$release_url\">release page</a>"
-            echo
-            echo "#Anyakernel #nomount #lkm$hashtag"
-          } > caption.html
+            echo "Binaries, source and license: <a href=\"$release_url\">release page</a>"
+          } > message.html
 
           {
             echo "tag=$tag"
             echo "short=$short"
             echo "title=$title"
             echo "pre=$pre"
+            echo "url=$release_url"
           } >> "$GITHUB_OUTPUT"
 
-      - name: GitHub release
+      - name: Publish release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG: ${{ steps.meta.outputs.tag }}
           TITLE: ${{ steps.meta.outputs.title }}
           PRE: ${{ steps.meta.outputs.pre }}
@@ -311,47 +318,40 @@ jobs:
           fi
 
       - name: Prune old releases
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
           gh release list --repo "$RELEASE_REPO" --limit 200 \
             --json tagName,createdAt \
-            --jq "[.[] | select(.tagName | startswith(\"AnyaKernel-NoMount-LKM-\"))]
+            --jq "[.[] | select(.tagName | startswith(\"$TAG_PREFIX\"))]
                   | sort_by(.createdAt) | reverse | .[$KEEP_RELEASES:] | .[].tagName" |
           while read -r t; do
             gh release delete "$t" --repo "$RELEASE_REPO" --cleanup-tag --yes
           done
 
-      - name: Telegram
+      - name: Notify Telegram
         if: ${{ env.BOT_TOKEN != '' && env.CHAT_ID != '' }}
+        env:
+          RELEASE_URL: ${{ steps.meta.outputs.url }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
 
-          api="https://api.telegram.org/bot${BOT_TOKEN}"
-          files=(out/*.ko)
-          caption="$(<caption.html)"
+          payload="$(jq -nc \
+            --arg chat "$CHAT_ID" \
+            --arg text "$(<message.html)" \
+            --arg url "$RELEASE_URL" '
+            {
+              chat_id: $chat,
+              text: $text,
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+              reply_markup: {
+                inline_keyboard: [[{ text: "Download", url: $url }]]
+              }
+            }')"
 
-          if (( ${#files[@]} == 1 )); then
-            resp="$(curl -sS "$api/sendDocument" \
-              -F chat_id="$CHAT_ID" \
-              -F document=@"${files[0]}" \
-              -F parse_mode=HTML \
-              -F caption="$caption")"
-          else
-            args=()
-            for i in "${!files[@]}"; do
-              args+=(-F "f$i=@${files[$i]}")
-            done
-            media="$(jq -nc --arg cap "$caption" --argjson n "${#files[@]}" '
-              [range($n) | {type: "document", media: "attach://f\(.)"}]
-              | .[-1] += {caption: $cap, parse_mode: "HTML"}')"
-            resp="$(curl -sS "$api/sendMediaGroup" \
-              -F chat_id="$CHAT_ID" \
-              -F media="$media" \
-              "${args[@]}")"
-          fi
+          resp="$(curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$payload")"
 
           jq -e '.ok' <<<"$resp" >/dev/null || {
             echo "telegram: $(jq -r '.description // "unknown error"' <<<"$resp")" >&2

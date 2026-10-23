@@ -1,4 +1,4 @@
-name: Build GKI-5.10 
+name: Build GKI-5.10
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ on:
       build_type:
         description: "Build variant"
         required: true
-        default: all
+        default: vanilla
         type: choice
         options:
           - all
@@ -58,15 +58,36 @@ jobs:
         run: |
           cat > variants.json <<'EOF'
           [
-            {"name": "KSU+SUSFS", "type": "susfs", "has_susfs": true, "nomount": false,
-             "zip": "Kernel-KSU-SUSFS", "release": "AnyaKernel-GKI-5.10",
-             "label": "KSU Next + SUSFS", "tags": "#ksu #susfs"},
-            {"name": "KSU+SUSFS+NoMount", "type": "susfs_nomount", "has_susfs": true, "nomount": true,
-             "zip": "Kernel-KSU-SUSFS-NoMount", "release": "AnyaKernel-GKI-5.10-NoMount",
-             "label": "KSU Next + SUSFS + NoMount", "tags": "#ksu #susfs #nomount"},
-            {"name": "Vanilla", "type": "vanilla", "has_susfs": false, "nomount": false,
-             "zip": "Kernel-Vanilla", "release": "AnyaKernel-Vanilla-5.10",
-             "label": "Vanilla (No KSU/SUSFS)", "tags": "#vanilla"}
+            {
+              "name": "KSU+SUSFS",
+              "type": "susfs",
+              "has_susfs": true,
+              "nomount": false,
+              "zip": "Kernel-KSU-SUSFS",
+              "release": "AnyaKernel-GKI-5.10",
+              "label": "KSU Next + SUSFS",
+              "tags": "#ksu #susfs"
+            },
+            {
+              "name": "KSU+SUSFS+NoMount",
+              "type": "susfs_nomount",
+              "has_susfs": true,
+              "nomount": true,
+              "zip": "Kernel-KSU-SUSFS-NoMount",
+              "release": "AnyaKernel-GKI-5.10-NoMount",
+              "label": "KSU Next + SUSFS + NoMount",
+              "tags": "#ksu #susfs #nomount"
+            },
+            {
+              "name": "Vanilla",
+              "type": "vanilla",
+              "has_susfs": false,
+              "nomount": false,
+              "zip": "Kernel-Vanilla",
+              "release": "AnyaKernel-Vanilla-5.10",
+              "label": "Vanilla (No KSU/SUSFS)",
+              "tags": "#vanilla"
+            }
           ]
           EOF
 
@@ -169,13 +190,20 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             git curl wget bc bison flex \
-            libssl-dev libelf-dev zip cpio libxml2
+            libssl-dev libelf-dev zip cpio
 
-          # XClang is linked against libxml2.so.16, runner only ships .so.2
           if [[ "$CLANG_CHOICE" == "xclang" ]]; then
             libdir="/usr/lib/x86_64-linux-gnu"
-            sudo ln -sf "$libdir/libxml2.so.2" "$libdir/libxml2.so.16"
-            sudo ldconfig
+
+            if [[ ! -e "$libdir/libxml2.so.16" ]]; then
+              src="$(find "$libdir" -maxdepth 1 -name 'libxml2.so.2*' -print -quit)"
+              if [[ -z "$src" ]]; then
+                echo "libxml2 runtime not found in $libdir" >&2
+                exit 1
+              fi
+              sudo ln -sf "$src" "$libdir/libxml2.so.16"
+              sudo ldconfig
+            fi
           fi
 
       - name: Restore clang cache
@@ -189,21 +217,25 @@ jobs:
         if: steps.clang-cache.outputs.cache-hit != 'true'
         run: |
           curl -fL -o clang.tar.gz "$CLANG_URL"
+
           if [[ "$CLANG_TYPE" == "flat" ]]; then
             tar -xzf clang.tar.gz
           else
             mkdir -p "$CLANG_DIR"
             tar -xzf clang.tar.gz -C "$CLANG_DIR"
           fi
+
           rm -f clang.tar.gz
 
       - name: Export clang path
         run: |
           bin="$(find "$PWD/$CLANG_DIR" \( -type f -o -type l \) -name clang -path '*/bin/*' -print -quit)"
+
           if [[ -z "$bin" ]]; then
             echo "clang binary not found in $CLANG_DIR" >&2
             exit 1
           fi
+
           echo "CLANG_PATH=$(dirname "$bin")" >> "$GITHUB_ENV"
 
       - name: Clone kernel
@@ -226,6 +258,7 @@ jobs:
           patches="$PWD/.susfs/kernel_patches"
           cp -R "$patches"/fs/* ./fs/
           cp -R "$patches"/include/* ./include/
+
           for p in "$patches"/*.patch; do
             patch -p1 --forward < "$p"
           done
@@ -329,13 +362,16 @@ jobs:
             echo "**Build date:** \`$BUILD_DATE\`"
             echo "**Variant:** $TG_VERSION"
             echo "**Latest commit:** $GIT_COMMIT"
+
             if [[ "$HAS_SUSFS" == "true" ]]; then
               echo "**KSU commit:** $KSU_COMMIT"
               echo "**SUSFS commit:** $SUSFS_COMMIT"
             fi
+
             if [[ "$NOMOUNT" == "true" ]]; then
               echo "**NoMount commit:** $NOMOUNT_COMMIT"
             fi
+
             echo "**Compiler:** $COMPILER"
             echo
             echo "---"
@@ -366,7 +402,6 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
         run: |
-          # parse_mode=HTML rejects raw <, > and &
           esc() {
             printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
           }
@@ -384,13 +419,16 @@ jobs:
             printf '📆 <b>Build date:</b> <code>%s</code>\n' "$BUILD_DATE"
             printf '🦎 <b>Variant:</b> %s\n' "$(esc "$TG_VERSION")"
             printf '♻️ <b>Latest commit:</b> %s\n' "$(esc "$GIT_COMMIT")"
+
             if [[ "$HAS_SUSFS" == "true" ]]; then
               printf '🔐 <b>KSU commit:</b> %s\n' "$(esc "$KSU_COMMIT")"
               printf '🛡️ <b>SUSFS commit:</b> %s\n' "$(esc "$SUSFS_COMMIT")"
             fi
+
             if [[ "$NOMOUNT" == "true" ]]; then
               printf '👻 <b>NoMount commit:</b> %s\n' "$(esc "$NOMOUNT_COMMIT")"
             fi
+
             printf '⚙️ <b>Compiler:</b> %s\n\n' "$(esc "$COMPILER")"
             printf '%s\n\n' "$TG_TAGS"
             printf '📥 <b>Download:</b> <a href="%s">GitHub Release</a>' "$url"

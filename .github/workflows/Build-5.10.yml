@@ -148,7 +148,7 @@ jobs:
         run: |
           case "$CLANG_CHOICE" in
             greenforce)
-              url="https://github.com/greenforce-project/greenforce_clang/releases/download/20260410/gf-clang-22.1.4-20260410.tar.gz"
+              url="https://github.com/greenforce-project/greenforce_clang/releases/download/20261024/gf-clang-24.0.0-20261024.tar.gz"
               type="dir"
               ;;
             llvm)

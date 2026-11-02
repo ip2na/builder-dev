@@ -152,7 +152,7 @@ jobs:
               type="dir"
               ;;
             llvm)
-              url="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.1-x86_64.tar.gz"
+              url="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.4-x86_64.tar.gz"
               type="flat"
               ;;
             xclang)

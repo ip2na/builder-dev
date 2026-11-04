@@ -148,11 +148,11 @@ jobs:
         run: |
           case "$CLANG_CHOICE" in
             greenforce)
-              url="https://github.com/greenforce-project/greenforce_clang/releases/download/20261024/gf-clang-24.0.0-20261024.tar.gz"
+              url="https://github.com/greenforce-project/greenforce_clang/releases/download/20261031/gf-clang-24.0.0-20261031.tar.gz"
               type="dir"
               ;;
             llvm)
-              url="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.4-x86_64.tar.gz"
+              url="https://mirrors.edge.kernel.org/pub/tools/llvm/files/llvm-23.1.5-x86_64.tar.gz"
               type="flat"
               ;;
             xclang)

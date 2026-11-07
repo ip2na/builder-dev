@@ -148,7 +148,7 @@ jobs:
         run: |
           case "$CLANG_CHOICE" in
             greenforce)
-              url="https://github.com/greenforce-project/greenforce_clang/releases/download/20261031/gf-clang-24.0.0-20261031.tar.gz"
+              url="https://github.com/greenforce-project/greenforce_clang/releases/download/20261107/gf-clang-24.0.0-20261107.tar.gz"
               type="dir"
               ;;
             llvm)
@@ -160,7 +160,7 @@ jobs:
               type="dir"
               ;;
             aosp)
-              url="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16464736/clang-r614150.tar.gz"
+              url="https://github.com/ip2na/aosp_clang_mirror/releases/download/clang-r614150-16836431/clang-r614150.tar.gz"
               type="dir"
               ;;
             *)
